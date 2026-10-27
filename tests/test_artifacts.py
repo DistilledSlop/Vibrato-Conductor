@@ -296,7 +296,7 @@ class CurriculumAdmissionTests(unittest.TestCase):
             root = Path(folder)
             run = finalized(root, mode='collection', success=True)
             metadata = json.loads((run / 'metadata.json').read_text())
-            metadata.update({'assignedGamemode':'creative','operator':False,'operatorLevel':2,'scenario':'creative_inventory'})
+            metadata.update({'assignedGamemode':'creative','operator':False,'operatorLevel':0,'scenario':'creative_inventory'})
             atomic_json(run / 'metadata.json', metadata)
             result = json.loads((run / 'result.json').read_text())
             result['assignmentContext'] = {'valid':True}

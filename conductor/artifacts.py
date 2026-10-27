@@ -72,7 +72,8 @@ def quality_report(root: Path) -> dict:
         declared_level = metadata.get('operatorLevel', metadata.get('operatorPermissionLevel', 2))
         valid_definition = (expected_mode in ('survival', 'creative', 'adventure', 'spectator')
             and isinstance(operator, bool) and isinstance(declared_level, int)
-            and not isinstance(declared_level, bool) and 1 <= declared_level <= 4)
+            and not isinstance(declared_level, bool)
+            and (1 <= declared_level <= 4 if operator else 0 <= declared_level <= 4))
         expected_level = declared_level if operator is True else 0
         context = result.get('assignmentContext') or {}
         observed_context = False
