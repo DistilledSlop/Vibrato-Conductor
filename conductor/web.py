@@ -356,7 +356,7 @@ def serve(config_path, host='127.0.0.1', port=8080, token_file=None):
     config = FleetConfig.from_dict(fleet_data)
     inventory = CoverageInventory(config.state_dir / 'coverage.sqlite3', world_bank=config.world_bank,
                                   catalog_path=config_data.get('catalog_dir'),
-                                  enabled_tasks=config_data.get('enabled_tasks'))
+                                  enabled_tasks=config_data.get('enabled_tasks'), seed=config.seed)
     fleet = Fleet(config, scheduler=inventory)
     central = config.central_dir
     store = ArtifactStore(config.artifacts_dir, central, state_dir=config.state_dir / 'delivery',

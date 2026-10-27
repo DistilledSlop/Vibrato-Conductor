@@ -4,7 +4,8 @@ const make = (tag, cls, text) => { const n=document.createElement(tag); if(cls)n
 const number = n => Number(n||0).toLocaleString();
 const bytes = n => { n=Number(n||0); if(!n)return '0 B'; const u=['B','KiB','MiB','GiB','TiB']; const i=Math.min(4,Math.floor(Math.log(n)/Math.log(1024))); return `${(n/1024**i).toFixed(i?1:0)} ${u[i]}`; };
 const age = wall => { const s=Math.max(0,Date.now()/1000-Number(wall||Date.now()/1000)); return s<60?`${Math.floor(s)}s` : s<3600?`${Math.floor(s/60)}m`:`${Math.floor(s/3600)}h ${Math.floor(s%3600/60)}m`; };
-const activeStates=new Set(['pending','created','starting','running','healthy','unhealthy','stopping']);
+const activeStates=new Set(['pending','created','starting','running','healthy','unhealthy','stopping','missing']);
+let firstSnapshot=true;
 let state=null, filter='active', view='gallery', detailId=null, detailGeneration=0, polling=false, authenticated=false, coverageInventory=null;
 const cardRefs=new Map();
 const visible=new Set();
@@ -22,13 +23,14 @@ function pill(status){return make('span',`pill ${status||'neutral'}`,status==='r
 function health(worker){return worker.liveHealth||worker.health||{};}
 function heartbeat(worker){return worker.heartbeat||health(worker).heartbeat||{};}
 function numeric(obj, keys){for(const key of keys){const val=obj?.[key];if(typeof val==='number'&&Number.isFinite(val))return val;}return null;}
-function tps(worker){const h=health(worker),b=heartbeat(worker);let server=numeric(h,['serverTps']);if(server===null)server=numeric(h.server||h.serverHealth,['tps','meanTps']);if(server===null)server=numeric(b,['serverTps']);let client=numeric(h,['clientTps']);if(client===null)client=numeric(b,['tps']);return {server,client};}
+function tps(worker){const h=health(worker),b=heartbeat(worker);let server=numeric(h,['serverMeanTps','serverTps']);if(server===null)server=numeric(h.server||h.serverHealth,['tps','meanTps']);if(server===null)server=numeric(b,['serverTps']);let client=numeric(h,['clientMeanTps','clientTps']);if(client===null)client=numeric(b,['tps']);return {server,client};}
 function captureBytes(worker){const h=health(worker);return h.captureBytes??h.capture?.bytes??worker.result?.capture?.bytes??0;}
 function workerTask(worker){return worker.task||worker.assignment?.task||'Unassigned';}
 function shortId(id){return id.length>23?id.slice(0,11)+'…'+id.slice(-8):id;}
 function selected(){return (state?.workers||[]).filter(w=>filter==='all'||(filter==='active'?activeStates.has(w.state):['unhealthy','failed','lost'].includes(w.state)));}
 function updateState(next){
   state=next;setAuthenticated(true);
+  if(firstSnapshot){firstSnapshot=false;if(!(state.counts?.active)&&state.workers?.length){filter='all';document.querySelectorAll('[data-filter]').forEach(b=>b.classList.toggle('active',b.dataset.filter==='all'));}}
   const counts=state.counts||{};$('environment').textContent=(state.fleetId||'FLEET')+' / OPERATIONS';
   $('desired').textContent=number(state.desired);$('healthy').textContent=number(counts.healthy??counts.running);
   $('starting').textContent=number((counts.starting||0)+(counts.pending||0)+(counts.created||0));
@@ -67,7 +69,7 @@ function createCard(w){
 }
 function updateCard(ref,w){
   ref.worker=w;ref.status.replaceChildren(pill(w.state));ref.runtime.textContent=age(w.createdWall);ref.world.textContent=(w.worldId||'Fresh generated world')+' · '+(w.gamemode||w.assignment?.gamemode||'survival')+(w.operator?' · operator':'');ref.task.textContent=workerTask(w);ref.leaf.textContent=heartbeat(w).leaf||w.reason||'Waiting for task telemetry';
-  const ts=tps(w);ref.metrics.replaceChildren();for(const [label,value] of [['TPS',ts.server===null?'—':ts.server.toFixed(1)],['CAPTURE',bytes(captureBytes(w))],['DIM',String(heartbeat(w).dimension||'—').replace('minecraft:','')]]){const n=make('span');n.append(make('span','',label+' '),make('strong','',value));ref.metrics.append(n);}
+  const ts=tps(w);ref.metrics.replaceChildren();for(const [label,value] of [['TPS',ts.server===null?'—':ts.server.toFixed(1)],['CAPTURE',bytes(captureBytes(w))],['MEM',bytes(health(w).resources?.memoryBytes)]]){const n=make('span');n.append(make('span','',label+' '),make('strong','',value));ref.metrics.append(n);}
   if(w.screenshot&&visible.has(w.runId))refreshThumbnail(w.runId);
 }
 function refreshThumbnail(id,force=false){const ref=cardRefs.get(id);if(!ref||!ref.worker.screenshot||view!=='gallery'||!visible.has(id))return;const now=Date.now();if(!force&&now-ref.lastFrame<14500)return;ref.lastFrame=now;ref.image.src=`/api/artifacts/${encodeURIComponent(id)}/screenshot.png?t=${Math.floor(now/15000)}`;ref.stamp.textContent=activeStates.has(ref.worker.state)?'LIVE · 15s':'RETAINED FRAME';}
@@ -82,8 +84,9 @@ async function refreshDetail(rebuild=false){
   const id=detailId,generation=detailGeneration;if(!id||!$('workerDialog').open)return;
   try{const w=await api('/api/workers/'+encodeURIComponent(id));if(generation!==detailGeneration)return;const root=$('workerDetail');
     if(rebuild||!$('detailFrame')){root.replaceChildren();const image=make('img','detail-image');image.id='detailFrame';image.alt='Minecraft client display';const controls=make('div','detail-controls');controls.append(make('span','', 'Live display · refreshes every 15 seconds'));for(const [action,label] of [['replace','Replace worker'],['stop','Stop worker']]){const b=make('button','secondary'+(action==='stop'?' danger':''),label);b.addEventListener('click',()=>act(id,action));controls.append(b);}const grid=make('div','detail-grid');grid.id='detailMetrics';const task=make('div','detail-task');task.id='detailTask';const tools=make('div','log-tools');tools.append(make('h2','', 'Recent process output'));const select=make('select');select.id='logComponent';select.setAttribute('aria-label','Log component');for(const name of ['client','server','proxy','display']){const option=make('option','',name);option.value=name;select.append(option);}select.addEventListener('change',()=>loadLogs(id));tools.append(select);const logs=make('pre');logs.id='logText';const links=make('div','artifact-links');for(const [path,label] of [['metadata.json','Run metadata'],['result.json','Result'],['manifest.json','Artifact manifest'],['health.json','Health evidence']]){const a=make('a','',label);a.href=`/api/artifacts/${encodeURIComponent(id)}/${path}`;a.target='_blank';a.rel='noopener';links.append(a);}root.append(image,controls,grid,task,tools,logs,links);}
+    const displayLabel=root.querySelector('.detail-controls>span');if(displayLabel)displayLabel.textContent=activeStates.has(w.state)?'Live display · refreshes every 15 seconds':'Retained diagnostic frame · worker has stopped';
     const image=$('detailFrame');image.hidden=!w.screenshot;if(w.screenshot)image.src=`/api/artifacts/${encodeURIComponent(id)}/screenshot.png?t=${Math.floor(Date.now()/15000)}`;
-    const ts=tps(w),hb=heartbeat(w);$('detailMetrics').replaceChildren(detailMetric('STATUS',w.state),detailMetric('SERVER TPS',ts.server===null?'Pending':ts.server.toFixed(2)),detailMetric('CLIENT TPS',ts.client===null?'Pending':ts.client.toFixed(2)),detailMetric('RAW CAPTURE',bytes(captureBytes(w))));
+    const ts=tps(w),hb=heartbeat(w);$('detailMetrics').replaceChildren(detailMetric('STATUS',w.state),detailMetric('SERVER TPS',ts.server===null?'Pending':ts.server.toFixed(2)),detailMetric('CLIENT TPS',ts.client===null?'Pending':ts.client.toFixed(2)),detailMetric('RAW CAPTURE',bytes(captureBytes(w))),detailMetric('MEMORY',bytes(health(w).resources?.memoryBytes)),detailMetric('CPU USED',Number(health(w).resources?.cpuUsageSeconds||0).toFixed(1)+' core-seconds'));
     $('detailTask').replaceChildren(make('h2','',workerTask(w)),make('p','',hb.leaf||w.reason||'No task state yet'),make('p','',`${w.worldId||'Generated world'} · seed ${w.seed} · ${hb.dimension||'dimension pending'} · ${age(w.createdWall)} runtime`));
     await loadLogs(id);
   }catch(e){if(generation===detailGeneration)toast(e.message,true);}

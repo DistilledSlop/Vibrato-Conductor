@@ -45,9 +45,14 @@ def main():
     run.add_argument('--allow-world-copy', action='store_true')
     run.add_argument('--accept-eula', action='store_true')
     run.add_argument('--accept-offline', action='store_true')
-    run.add_argument('--cpus', type=float, default=4)
+    run.add_argument('--cpus', type=float, default=8)
     run.add_argument('--memory', default='6g')
     run.add_argument('--perf', choices=['normal', 'low'], default='normal')
+    run.add_argument('--mode', choices=['diagnostic', 'collection'], default='diagnostic')
+    run.add_argument('--gamemode', choices=['survival', 'creative', 'adventure', 'spectator'], default='survival')
+    run.add_argument('--operator', action='store_true', help='Grant only this isolated bot operator permissions')
+    run.add_argument('--operator-level', type=int, choices=[1, 2, 3, 4], default=2)
+    run.add_argument('--render-threads', type=int, choices=range(1,33), help='Explicit llvmpipe rendering thread budget')
     run.add_argument('--wait', action='store_true')
     commands.add_parser('status', help='List conductor worker containers')
     stop = commands.add_parser('stop', help='Stop an owned worker, preserving artifacts')
@@ -92,7 +97,10 @@ def main():
         parser.error('run requires --accept-eula and --accept-offline')
     values = {'RUN_ID': args.id, 'SEED': str(args.seed), 'TASK': args.task,
               'RUN_SECONDS': str(args.seconds), 'PERF_MODE': args.perf,
-              'ACCEPT_EULA': 'true', 'ACCEPT_OFFLINE': 'true'}
+              'ACCEPT_EULA': 'true', 'ACCEPT_OFFLINE': 'true',
+              'MODE': args.mode, 'GAMEMODE': args.gamemode,
+              'OPERATOR': str(args.operator).lower(), 'OP_PERMISSION_LEVEL': str(args.operator_level)}
+    if args.render_threads is not None: values['LP_NUM_THREADS'] = str(args.render_threads)
     if args.world_id:
         if args.world_bank is None: parser.error('--world-id requires --world-bank')
         values['WORLD_ID'] = args.world_id
