@@ -520,10 +520,10 @@ class Fleet:
         elif not (self.config.accept_eula and self.config.accept_offline): self._paused_reason = 'acceptance_required'
         elif now < float(self._setting('circuit_until')): self._paused_reason = 'failure_circuit_open'
         elif self._last_capacity['pressure']: self._paused_reason = self._last_capacity['pressure']
-        elif desired > self._last_capacity['limit']: self._paused_reason = 'resource_capacity_limit'
         elif now < float(self._setting('next_start')): self._paused_reason = 'failure_backoff'
         elif now - float(self._setting('last_start')) < self.config.stagger_seconds: self._paused_reason = 'startup_stagger'
-        if not self._paused_reason and len(active) < min(desired, self._last_capacity['limit']):
+        elif desired > self._last_capacity['limit']: self._paused_reason = 'resource_capacity_limit'
+        if self._paused_reason in (None, 'resource_capacity_limit') and len(active) < min(desired, self._last_capacity['limit']):
             run_id = time.strftime('%Y%m%d%H%M%S', time.gmtime(now)) + '-' + uuid.uuid4().hex[:10]
             spec = self._new_spec(run_id)
             with self.db:

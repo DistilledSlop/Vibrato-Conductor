@@ -290,6 +290,19 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(self.runtime.creates, [])
         self.assertEqual(self.fleet.snapshot()['workers'], [])
 
+    def test_requested_fleet_larger_than_budget_starts_only_what_fits(self):
+        self.fleet.set_target(3)
+        with patch.object(self.fleet, '_capacity', return_value={'limit': 1, 'pressure': None}):
+            first = self.fleet.reconcile()
+            self.assertEqual(first['pausedReason'], 'resource_capacity_limit')
+            self.assertEqual(len(self.runtime.creates), 1)
+            self.clock.advance(5)
+            self.fleet.reconcile()
+            self.assertEqual(len(self.runtime.creates), 1)
+            self.runtime.workers[first['workers'][0]['runId']]['state'] = 'failed'
+            self.assertEqual(self.fleet.reconcile()['pausedReason'], 'failure_backoff')
+            self.assertEqual(len(self.runtime.creates), 1)
+
     def test_configuration_rejects_unsafe_identity_and_bad_limits(self):
         for data in ({'fleet_id': '../bad'}, {'cpus': float('nan')}, {'desired': 2, 'max_workers': 1},
                      {'accept_eula': 'false'}, {'world_ids': ['../bad'], 'world_bank': '/bank'}):
