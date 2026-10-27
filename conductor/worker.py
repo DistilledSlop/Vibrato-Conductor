@@ -1,5 +1,7 @@
 """One isolated client -> recorder -> Fabric server, with durable diagnostic artifacts."""
 from __future__ import annotations
+import hashlib
+import uuid
 import importlib.util
 import json
 import math
@@ -49,6 +51,9 @@ class Config:
     screenshot_seconds: int = 15
     collection_settle_seconds: float = 45
     warmup_seconds: float = 20
+    gamemode: str = 'survival'
+    operator: bool = False
+    operator_level: int = 0
 
     @classmethod
     def read(cls, env=None):
@@ -71,8 +76,17 @@ class Config:
         perf = env.get('PERF_MODE', 'normal')
         if perf not in ('normal', 'low'):
             raise ValueError('PERF_MODE must be normal or low')
+        scenario = task.removeprefix('@conductor_scenario ') if task.startswith('@conductor_scenario ') else None
+        if env.get('SCENARIO') and env['SCENARIO'] != scenario: raise ValueError('SCENARIO must match the dispatched scenario task')
         mode = env.get('MODE', 'diagnostic')
         if mode not in ('diagnostic', 'collection'): raise ValueError('MODE must be diagnostic or collection')
+        gamemode = env.get('GAMEMODE', 'survival')
+        if gamemode not in ('survival','creative','adventure','spectator'): raise ValueError('Invalid GAMEMODE')
+        if env.get('OPERATOR', 'false') not in ('true','false'): raise ValueError('OPERATOR must be true or false')
+        operator = env.get('OPERATOR', 'false') == 'true'
+        permission = number(env, 'OP_PERMISSION_LEVEL', 2, 1, 4) if operator else 0
+        if permission != int(permission): raise ValueError('OP_PERMISSION_LEVEL must be an integer')
+        operator_level = int(permission)
         return cls(run_id, seed, task, number(env, 'RUN_SECONDS', 300, 10, 86400),
                    number(env, 'STARTUP_SECONDS', 240, 10, 1800),
                    number(env, 'HEARTBEAT_SECONDS', 45, 5, 600),
@@ -84,7 +98,7 @@ class Config:
                    env.get('SCREENSHOTS', 'true') == 'true',
                    int(number(env, 'SCREENSHOT_SECONDS', 15, 5, 300)),
                    number(env, 'COLLECTION_SETTLE_SECONDS', 45, 0, 120),
-                   number(env, 'WARMUP_SECONDS', 20, 0, 120))
+                   number(env, 'WARMUP_SECONDS', 20, 0, 120), gamemode, operator, operator_level)
 
 
 def capture_evidence(captures: Path) -> dict:
@@ -126,6 +140,8 @@ class Worker:
         self.root = Path('/work') / config.run_id
         self.artifacts = Path('/artifacts') / config.run_id
         self.health_path = Path('/work/health.json')
+        self.username = 'V' + hashlib.sha256(config.run_id.encode()).hexdigest()[:15]
+        self.player_uuid = str(uuid.UUID(bytes=hashlib.md5(('OfflinePlayer:'+self.username).encode()).digest(), version=3))
         self.children = {}
         self.stopping = False
         self.phase = 'starting'
@@ -237,6 +253,10 @@ class Worker:
             'captureBytes': self.last_capture_bytes, 'resources': self.resources,
             'classification': self.classification,
             'worldReady': bool(self.last_client and self.last_client.get('worldReady')),
+            'actualMode': None if not self.last_client else self.last_client.get('actualMode'),
+            'permissionLevel': None if not self.last_client else self.last_client.get('permissionLevel'),
+            'permissionSource': None if not self.last_client else self.last_client.get('permissionSource'),
+            'assignedGamemode': self.config.gamemode, 'operator': self.config.operator,
             'warmingUp': not self.measurement_ready(),
             'capacityReady': self.measurement_ready() and len(self.server_measurements) >= 10 and len(self.client_measurements) >= 10,
             'screenshotWall': None if self._last_screenshot is None else self._last_screenshot.get('wall'),
@@ -294,9 +314,12 @@ class Worker:
         properties = {
             'server-ip': '127.0.0.1', 'server-port': '25565', 'online-mode': 'false',
             'enforce-secure-profile': 'false', 'level-name': 'world', 'level-seed': str(self.config.seed),
-            'difficulty': 'normal', 'gamemode': 'survival', 'motd': 'Vibrato diagnostic worker',
+            'difficulty': 'normal', 'gamemode': self.config.gamemode, 'force-gamemode': 'true', 'motd': 'Vibrato diagnostic worker',
             'max-players': '1', 'spawn-protection': '0',
         }
+        if self.config.operator:
+            atomic_json(server / 'ops.json', [{'uuid': self.player_uuid, 'name': self.username,
+                                               'level': self.config.operator_level, 'bypassesPlayerLimit': False}])
         (server / 'server.properties').write_text(''.join(f'{key}={value}\n' for key, value in properties.items()))
         world = {'id': None, 'mode': 'generated', 'seed': self.config.seed}
         if self.config.world_id:
@@ -313,6 +336,13 @@ class Worker:
             script.write_text(f'0 @stop\n1 {self.config.task}\n0 wait-idle {self.config.seconds}\n{settle} exit\n')
         metadata = {
             'schemaVersion': 1, 'runId': self.config.run_id, 'seed': self.config.seed,
+            'assignedGamemode': self.config.gamemode, 'operator': self.config.operator,
+            'operatorPermissionLevel': self.config.operator_level, 'operatorLevel': self.config.operator_level,
+            'scenario': self.config.task.removeprefix('@conductor_scenario ') if self.config.task.startswith('@conductor_scenario ') else None,
+            'renderEnvironment': {key: os.environ.get(key) for key in ['LIBGL_ALWAYS_SOFTWARE','LP_NUM_THREADS','MESA_LOADER_DRIVER_OVERRIDE','DISPLAY']},
+            'requestedResources': {'cpus': os.environ.get('REQUESTED_CPUS') or os.environ.get('WORKER_CPUS'),
+                                   'cpuMax': (Path('/sys/fs/cgroup/cpu.max').read_text().strip() if Path('/sys/fs/cgroup/cpu.max').exists() else None)},
+            'identity': {'username': self.username, 'uuid': self.player_uuid},
             'assignment': self.config.task, 'runSeconds': self.config.seconds, 'mode': self.config.mode,
             'world': world, 'perf': self.config.perf, 'connection': 'client -> 127.0.0.1:25566 -> 127.0.0.1:25565',
             'versions': json.loads(Path('/opt/game/versions.json').read_text()),
@@ -327,6 +357,7 @@ class Worker:
         self.wait_for(lambda: Path('/tmp/.X11-unix/X99').exists(), 'display')
         self.spawn('server', ['java', '-Xms512M', '-Xmx' + self.config.server_heap,
                              '-Dvibrato.telemetry.path=' + str(self.root / 'server-heartbeat.json'),
+                             '-Dvibrato.assignedGamemode=' + self.config.gamemode,
                              '-jar', 'fabric-server-launch.jar', 'nogui'], server, stdin=subprocess.PIPE)
         server_log = self.artifacts / 'logs/server.log'
         self.wait_for(lambda: 'Done (' in server_log.read_text(errors='replace'), 'server')
@@ -343,7 +374,7 @@ class Worker:
         fleet = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(fleet)
         # Vanilla usernames have a 16-character limit; keep the full run id in metadata.
-        name = 'V' + __import__('hashlib').sha256(self.config.run_id.encode()).hexdigest()[:15]
+        name = self.username
         options = fleet.bot_options(name, client, '127.0.0.1', 25566, self.config.client_heap)
         natives = client / 'natives'
         natives.mkdir()
@@ -351,7 +382,8 @@ class Worker:
         options['jvmArguments'] += [f'-Dvibrato.seed={self.config.seed}', f'-Dvibrato.perf={self.config.perf}',
                                     f'-Dvibrato.script={script}', '-Dvibrato.campaignTelemetry=true',
                                     '-Dvibrato.screenshots=' + str(self.config.screenshots).lower(),
-                                    '-Dvibrato.screenshotIntervalSeconds=' + str(self.config.screenshot_seconds)]
+                                    '-Dvibrato.screenshotIntervalSeconds=' + str(self.config.screenshot_seconds),
+                                    '-Dvibrato.serverTelemetryFile=' + str(self.root / 'server-heartbeat.json')]
         argv = mll.command.get_minecraft_command(metadata['versions']['profile'], '/opt/game/minecraft', options)
         self.spawn('client', argv, client)
 
@@ -399,6 +431,14 @@ class Worker:
             if self.last_heartbeat and now - self.last_heartbeat > self.config.heartbeat_seconds: return 'heartbeat_timeout'
             if joined_at and (not self.last_server or time.time() - self.last_server.get('wall', 0) > self.config.heartbeat_seconds):
                 return 'server_heartbeat_timeout'
+            if joined_at and self.last_client and self.last_client.get('permissionSource') == 'server_observer':
+                if (self.last_client.get('actualMode') != self.config.gamemode
+                        or self.last_client.get('serverMode') != self.config.gamemode
+                        or self.last_client.get('permissionLevel') != self.config.operator_level):
+                    self.classification = Watchdog.assessment('assignment_context_mismatch', 'infrastructure', 'confirmed',
+                        assignedMode=self.config.gamemode, actualMode=self.last_client.get('actualMode'),
+                        assignedPermission=self.config.operator_level, actualPermission=self.last_client.get('permissionLevel'))
+                    self.phase = 'unhealthy'; self.health(); return 'assignment_context_mismatch'
             assessment = self.watchdog.observe(self.last_client, self.last_server, self.resources, now) if self.measurement_ready() else None
             if assessment:
                 self.classification = assessment
@@ -450,7 +490,7 @@ class Worker:
         finally:
             self.phase = 'stopping'
             self.shutdown()
-        for name in ['script-result.json', 'campaign-heartbeat.json']:
+        for name in ['script-result.json', 'campaign-heartbeat.json', 'scenario-result.json']:
             source = self.root / 'client' / name
             if source.exists(): shutil.copyfile(source, self.artifacts / name)
         self.copy_screenshot(self.root / 'client')
@@ -466,7 +506,18 @@ class Worker:
         ok = ok and all(self.children.get(name) is not None and self.children[name].returncode == 0
                         for name in ['client', 'proxy', 'server'])
         success = task_success(self.config.task, script_result)
+        if self.config.task.startswith('@conductor_scenario '):
+            scenario = self.read_json(self.artifacts / 'scenario-result.json') or {}
+            if (scenario.get('scenario') != self.config.task.removeprefix('@conductor_scenario ')
+                    or scenario.get('status') != 'completed' or scenario.get('source') != 'client_actions_plus_server_observer'
+                    or scenario.get('evidence', {}).get('serverConfirmed') is not True):
+                success = False; ok = False
+                if reason == 'client_finished': reason = 'scenario_unconfirmed'
         if reason != 'client_finished' or not script_ok: success = False if self.config.task != 'director' else None
+        context_valid = bool(self.last_client and self.last_client.get('actualMode') == self.config.gamemode
+                             and self.last_client.get('serverMode') == self.config.gamemode
+                             and self.last_client.get('permissionSource') == 'server_observer'
+                             and self.last_client.get('permissionLevel') == self.config.operator_level)
         server_health = {
             'samples': len(self.server_measurements),
             'meanTps': mean(self.server_measurements) if self.server_measurements else None,
@@ -478,6 +529,7 @@ class Worker:
                          'meanTps': mean(self.client_measurements) if self.client_measurements else None}
         client_health['valid'] = client_health['samples'] >= 10 and client_health['meanTps'] >= 18
         invalid = []
+        if not context_valid: invalid.append('assignment_context_unconfirmed')
         if not client_health['valid']: invalid.append('client_tick_health_not_established')
         if not server_health['valid']: invalid.append('server_tick_health_not_established')
         if self.classification: invalid.append(self.classification['reason'])
@@ -487,6 +539,7 @@ class Worker:
         result = {
             'schemaVersion': 1, 'runId': self.config.run_id, 'reason': reason, 'diagnosticPassed': ok,
             'datasetEligible': eligible, 'taskSuccess': success, 'mode': self.config.mode,
+            'assignmentContext': {'valid': context_valid, 'gamemode': self.config.gamemode, 'operatorPermissionLevel': self.config.operator_level},
             'serverHealth': server_health, 'clientHealth': client_health, 'qualityInvalid': invalid, 'watchdog': self.classification, 'heartbeatSamples': self.heartbeat_count,
             'capture': evidence, 'elapsedSeconds': time.monotonic() - self.started,
             'exitCodes': {name: proc.returncode for name, proc in self.children.items()},

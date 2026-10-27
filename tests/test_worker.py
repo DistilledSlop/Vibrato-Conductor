@@ -19,6 +19,11 @@ class WorkerTests(unittest.TestCase):
                        {'RUN_ID': 'x', 'TASK': '@nether\n0 exit'}, {'RUN_ID': 'x', 'CLIENT_HEAP': '-bad'}):
             with self.subTest(values=values), self.assertRaises(ValueError): Config.read(values)
         self.assertEqual(Config.read({'RUN_ID': 'x', 'TASK': '@get oak_log 1'}).task, '@get oak_log 1')
+        for extra in [{'GAMEMODE':'admin'},{'OPERATOR':'yes'},{'OPERATOR':'true','OP_PERMISSION_LEVEL':'1.5'}]:
+            with self.assertRaises(ValueError): Config.read({'RUN_ID':'x',**extra})
+        self.assertEqual(Config.read({'RUN_ID':'x'}).operator_level,0)
+        self.assertEqual(Config.read({'RUN_ID':'x','GAMEMODE':'creative'}).operator_level,0)
+        self.assertEqual(Config.read({'RUN_ID':'x','OPERATOR':'true'}).operator_level,2)
 
     def test_capture_proof_requires_both_directions_and_exact_offsets(self):
         with tempfile.TemporaryDirectory() as tmp:
