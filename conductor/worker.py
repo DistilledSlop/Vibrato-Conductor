@@ -19,6 +19,7 @@ from statistics import mean
 from pathlib import Path
 
 from .storage import atomic_json, artifact_manifest, stage_world
+from .evidence import snapshot_world
 from .diagnostics import IntervalRate, Watchdog, task_success, script_failure_reason
 
 
@@ -54,6 +55,9 @@ class Config:
     gamemode: str = 'survival'
     operator: bool = False
     operator_level: int = 0
+    failure_snapshots: bool = True
+    snapshot_max_bytes: int = 256*1024**2
+    snapshot_seconds: float = 10
 
     @classmethod
     def read(cls, env=None):
@@ -98,7 +102,10 @@ class Config:
                    env.get('SCREENSHOTS', 'true') == 'true',
                    int(number(env, 'SCREENSHOT_SECONDS', 15, 5, 300)),
                    number(env, 'COLLECTION_SETTLE_SECONDS', 45, 0, 120),
-                   number(env, 'WARMUP_SECONDS', 20, 0, 120), gamemode, operator, operator_level)
+                   number(env, 'WARMUP_SECONDS', 20, 0, 120), gamemode, operator, operator_level,
+                   env.get('SNAPSHOT_FAILURES','true') == 'true',
+                   int(number(env,'SNAPSHOT_MAX_BYTES',256*1024**2,1024,1024**3)),
+                   number(env,'SNAPSHOT_SECONDS',10,1,30))
 
 
 def capture_evidence(captures: Path) -> dict:
@@ -555,11 +562,18 @@ class Worker:
         if success is not True: invalid.append('task_success_not_confirmed')
         if not ok: invalid.append('worker_diagnostic_failed')
         eligible = self.config.mode == 'collection' and not invalid and evidence['complete']
+        world_snapshot = {'status':'skipped','reason':'not_failed_or_disabled'}
+        if self.config.failure_snapshots and (not ok or success is False):
+            available = min(self.config.snapshot_max_bytes, max(0,self.config.max_bytes-self.storage_bytes()))
+            world_snapshot = snapshot_world(self.root/'server/world', self.artifacts/'world-snapshot.tar.gz',
+                                            max_bytes=available, seconds=self.config.snapshot_seconds)
+            server = self.children.get('server')
+            world_snapshot['serverExitedCleanly'] = server is not None and server.returncode == 0
         result = {
             'schemaVersion': 1, 'runId': self.config.run_id, 'reason': reason, 'diagnosticPassed': ok,
             'datasetEligible': eligible, 'taskSuccess': success, 'mode': self.config.mode,
             'assignmentContext': {'valid': context_valid, 'gamemode': self.config.gamemode, 'operatorPermissionLevel': self.config.operator_level},
-            'serverHealth': server_health, 'clientHealth': client_health, 'qualityInvalid': invalid, 'watchdog': self.classification, 'heartbeatSamples': self.heartbeat_count,
+            'worldSnapshot': world_snapshot, 'serverHealth': server_health, 'clientHealth': client_health, 'qualityInvalid': invalid, 'watchdog': self.classification, 'heartbeatSamples': self.heartbeat_count,
             'capture': evidence, 'elapsedSeconds': time.monotonic() - self.started,
             'exitCodes': {name: proc.returncode for name, proc in self.children.items()},
             'limitations': ['Behavior loop/stall watchdog classifications are inferred unless the task reports failure',
