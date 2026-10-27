@@ -9,7 +9,7 @@ import threading
 import time
 from pathlib import Path
 
-from .storage import digest, inspect_world_bank, verify_manifest
+from .storage import IDENTIFIER, digest, inspect_world_bank, verify_manifest
 
 CATALOGS = Path(__file__).resolve().parents[1] / 'catalogs'
 DIRECTIONS = {'C2S': 'serverbound', 'S2C': 'clientbound'}
@@ -28,12 +28,17 @@ def packet_id(stream, offset: int, length: int) -> int:
 
 class CoverageInventory:
     def __init__(self, db_path: Path, catalog_path: Path | None = None,
-                 enabled_tasks: list[str] | None = None, world_bank: Path | None = None, seed: int = 424242):
+                 enabled_tasks: list[str] | None = None, world_bank: Path | None = None, seed: int = 424242,
+                 task_failure_limit: int = 3, task_cooldown_seconds: float = 900):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.catalog_path = Path(catalog_path or CATALOGS)
         self.world_bank = Path(world_bank) if world_bank is not None else None
         self.seed = int(seed)
+        self.task_failure_limit = int(task_failure_limit)
+        self.task_cooldown_seconds = float(task_cooldown_seconds)
+        if self.task_failure_limit < 1 or not 0 <= self.task_cooldown_seconds <= 86400:
+            raise ValueError('Invalid task failure cooldown settings')
         self.lock = threading.RLock()
         self.tasks = json.loads((self.catalog_path / 'tasks.json').read_text())['tasks']
         self.enabled_tasks = set(enabled_tasks) if enabled_tasks is not None else None
@@ -52,6 +57,9 @@ class CoverageInventory:
                     assignment TEXT NOT NULL, assigned_at REAL NOT NULL);
                 CREATE TABLE IF NOT EXISTS runs(run_id TEXT PRIMARY KEY,manifest_sha TEXT NOT NULL,
                     ingested_at REAL NOT NULL,result TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS task_health(task_id TEXT PRIMARY KEY, failures INTEGER NOT NULL DEFAULT 0,
+                    consecutive_failures INTEGER NOT NULL DEFAULT 0, cooldown_until REAL NOT NULL DEFAULT 0,
+                    last_reason TEXT, last_failure REAL);
                 CREATE TABLE IF NOT EXISTS unknown_evidence(run_id TEXT NOT NULL,kind TEXT NOT NULL,
                     identity TEXT NOT NULL,PRIMARY KEY(run_id,kind,identity));
             ''')
@@ -94,6 +102,7 @@ class CoverageInventory:
 
     def choose(self, run_id: str, worlds=None) -> dict:
         """Persist allocation before backend create; retries of a run id receive the same assignment."""
+        if not IDENTIFIER.fullmatch(run_id): raise ValueError('Invalid run id')
         with self.lock, self._db() as db:
             db.execute('BEGIN IMMEDIATE')
             previous = db.execute('SELECT assignment FROM assignments WHERE run_id=?', (run_id,)).fetchone()
@@ -108,17 +117,21 @@ class CoverageInventory:
             else:
                 available = [{'id': None, 'tags': [], 'supported': True}]
             eligible = []
+            health = {r['task_id']: dict(r) for r in db.execute('SELECT * FROM task_health')}
+            now = time.time()
             assigned = dict(db.execute('SELECT task_id,COUNT(*) FROM assignments GROUP BY task_id'))
             counts = dict(db.execute('SELECT target_id,COUNT(*) FROM observations GROUP BY target_id'))
             successes = dict(db.execute('SELECT target_id,COUNT(*) FROM successes GROUP BY target_id'))
             for task in self.tasks:
+                task_health = health.get(task['id'], {})
+                if task_health.get('cooldown_until', 0) > now: continue
                 if not task['supported'] or self.enabled_tasks is not None and task['id'] not in self.enabled_tasks: continue
                 for world in available:
                     if not world.get('supported', True) or world.get('minecraftVersion', '1.21.1') != '1.21.1': continue
                     if not set(task.get('requiresTags', [])).issubset(world.get('tags', [])): continue
                     targets = ['task:' + task['id'], *task.get('targets', [])]
                     deficit = sum(1 / (1 + counts.get(t, 0) + 2 * successes.get(t, 0)) for t in targets) / len(targets)
-                    score = deficit / (1 + assigned.get(task['id'], 0))
+                    score = deficit / ((1 + assigned.get(task['id'], 0)) * (1 + task_health.get('consecutive_failures', 0)))
                     tie = hashlib.sha256(f'{self.seed}:{run_id}:{task["id"]}:{world.get("id")}'.encode()).hexdigest()
                     eligible.append((score, tie, task, world, targets))
             if not eligible: raise ValueError('No supported task matches the available worlds and scheduling filters')
@@ -135,6 +148,8 @@ class CoverageInventory:
         result = verify_manifest(run_dir)
         metadata = json.loads((run_dir / 'metadata.json').read_text())
         run_id = result.get('runId') or metadata.get('runId') or run_dir.name
+        if not IDENTIFIER.fullmatch(run_id) or run_dir.name != run_id or metadata.get('runId', run_id) != run_id:
+            raise ValueError('Coverage run identity does not match artifact directory')
         fingerprint = digest(run_dir / 'manifest.json')
         with self.lock, self._db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -156,7 +171,9 @@ class CoverageInventory:
                 raw_path = index.with_suffix('.bin')
                 status_path = index.with_suffix('.status.json')
                 if not raw_path.exists() or not status_path.exists(): continue
-                status = json.loads(status_path.read_text())
+                try: status = json.loads(status_path.read_text())
+                except (OSError, ValueError):
+                    unknown.add(('artifact', 'malformed_capture_marker:' + status_path.name)); continue
                 if not status.get('complete'): continue
                 end = 0
                 with index.open() as lines, raw_path.open('rb') as raw:
@@ -176,19 +193,32 @@ class CoverageInventory:
             if heartbeats.exists():
                 with heartbeats.open() as lines:
                     for line in lines:
-                        heartbeat = json.loads(line)
+                        try: heartbeat = json.loads(line)
+                        except ValueError:
+                            unknown.add(('artifact', 'malformed_heartbeat_line')); continue
+                        if not isinstance(heartbeat, dict):
+                            unknown.add(('artifact', 'invalid_heartbeat_shape')); continue
                         observed_director = observed_director or heartbeat.get('rootClass') == 'DirectorTask'
                         semantics = heartbeat.get('observationSemantics', {})
+                        observations = heartbeat.get('observations', {})
+                        if not isinstance(semantics, dict) or not isinstance(observations, dict):
+                            unknown.add(('artifact', 'invalid_observation_shape')); continue
                         for plural, kind, rule in [('items','item','inventory_present'),('blocks','block','crosshair_target'),('mobs','mob','loaded_nearby')]:
                             # Require the instrumentation's declared actual observation semantics.
                             if semantics.get(plural) != rule: continue
-                            for identifier in set(heartbeat.get('observations', {}).get(plural, [])):
+                            values = observations.get(plural, [])
+                            if not isinstance(values, list) or any(not isinstance(v, str) for v in values):
+                                unknown.add(('artifact', 'invalid_observation_values:' + plural)); continue
+                            for identifier in set(values):
                                 if isinstance(identifier, str) and re.fullmatch(r'[a-z0-9_.-]+:[a-z0-9_./-]+', identifier):
                                     record(kind + ':' + identifier, 'heartbeat:' + rule)
             assignment = db.execute('SELECT task_id FROM assignments WHERE run_id=?', (run_id,)).fetchone()
             task_id = assignment[0] if assignment else next((t['id'] for t in self.tasks if t['command'] == metadata.get('assignment')), None)
             script_path = run_dir / 'script-result.json'
-            script = json.loads(script_path.read_text()) if script_path.exists() else {}
+            try: script = json.loads(script_path.read_text()) if script_path.exists() else {}
+            except ValueError:
+                unknown.add(('artifact', 'malformed_script_result')); script = {}
+            if not isinstance(script, dict): script = {}
             command = next((t['command'] for t in self.tasks if t['id'] == task_id), None)
             task_seen = (command == 'director' and observed_director) or any(
                 c.get('action') == command and c.get('status') in ('dispatched', 'completed')
@@ -205,6 +235,19 @@ class CoverageInventory:
                     db.execute('INSERT OR IGNORE INTO successes VALUES(?,?)', (run_id, target))
             for kind, identity in unknown:
                 db.execute('INSERT INTO unknown_evidence VALUES(?,?,?)', (run_id, kind, identity))
+            if task_id and task_seen:
+                reason = str(result.get('reason', 'unknown'))
+                failure = result.get('taskSuccess') is False or result.get('diagnosticPassed') is False
+                operator_or_host = any(token in reason.lower() for token in ('operator', 'scale_down', 'overload', 'storage_limit', 'replaced', 'runtime_', 'killed', 'crash', 'exited'))
+                db.execute('INSERT OR IGNORE INTO task_health(task_id) VALUES(?)', (task_id,))
+                if result.get('taskSuccess') is True and result.get('diagnosticPassed') is True:
+                    db.execute('UPDATE task_health SET consecutive_failures=0,cooldown_until=0,last_reason=NULL WHERE task_id=?', (task_id,))
+                elif failure and not operator_or_host:
+                    previous = db.execute('SELECT consecutive_failures FROM task_health WHERE task_id=?', (task_id,)).fetchone()[0]
+                    consecutive = previous + 1
+                    cooldown = time.time() + min(86400, self.task_cooldown_seconds * 2**min(consecutive - self.task_failure_limit, 6)) if consecutive >= self.task_failure_limit else 0
+                    db.execute('UPDATE task_health SET failures=failures+1,consecutive_failures=?,cooldown_until=?,last_reason=?,last_failure=? WHERE task_id=?',
+                               (consecutive, cooldown, reason, time.time(), task_id))
             summary = {'runId': run_id, 'observedTargets': len(observed), 'successfulTargets': len(successful_targets),
                        'unknownTargets': len(unknown), 'taskSuccess': result.get('taskSuccess')}
             db.execute('INSERT INTO runs VALUES(?,?,?,?)', (run_id, fingerprint, time.time(), json.dumps(summary)))
@@ -214,6 +257,7 @@ class CoverageInventory:
         with self.lock, self._db() as db:
             counts = {r[0]: (r[1], r[2]) for r in db.execute('SELECT target_id,COUNT(*),SUM(count) FROM observations GROUP BY target_id')}
             successes = dict(db.execute('SELECT target_id,COUNT(*) FROM successes GROUP BY target_id'))
+            health = {r['task_id']: dict(r) for r in db.execute('SELECT * FROM task_health')}
             targets = []
             categories = {}
             for row in db.execute('SELECT * FROM targets ORDER BY kind,id'):
@@ -222,11 +266,15 @@ class CoverageInventory:
                 target = {'id': row['id'], 'kind': row['kind'], 'label': row['label'], 'supported': bool(row['supported']),
                           'evidenceRule': row['evidence_rule'], 'observedRuns': observed_runs,
                           'observations': observations, 'successfulRuns': success, **json.loads(row['details'])}
+                if row['kind'] == 'task':
+                    record = health.get(row['id'].removeprefix('task:'), {})
+                    target['failures'] = record.get('failures', 0)
+                    target['cooldownUntil'] = record.get('cooldown_until', 0)
                 targets.append(target)
                 group = categories.setdefault(row['kind'], dict(requested=0, observed=0, successful=0, missing=0, unsupported=0))
                 group['requested'] += 1; group['observed'] += bool(observed_runs); group['successful'] += bool(success)
                 group['missing'] += not bool(observed_runs); group['unsupported'] += not bool(row['supported'])
-            return {'categories': categories, 'targets': targets,
+            return {'categories': categories, 'targets': targets, 'taskHealth': list(health.values()),
                     'missing': [t['id'] for t in targets if not t['observedRuns']],
                     'unsupported': [t['id'] for t in targets if not t['supported']],
                     'assignments': db.execute('SELECT COUNT(*) FROM assignments').fetchone()[0],

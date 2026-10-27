@@ -105,3 +105,25 @@ class CoverageTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class FailureSchedulingTests(unittest.TestCase):
+    def test_actual_repeated_task_failures_cool_down_and_success_resets(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            inventory = CoverageInventory(root / 'coverage.sqlite', enabled_tasks=['get-oak_log'], task_failure_limit=2, task_cooldown_seconds=900)
+            for index in range(2):
+                run_id = 'failure-'+str(index)
+                inventory.choose(run_id)
+                run = capture_run(root / 'runs', run_id, success=False, include_script=True)
+                inventory.ingest(run)
+            task = next(t for t in inventory.snapshot()['targets'] if t['id'] == 'task:get-oak_log')
+            self.assertEqual(task['failures'], 2)
+            self.assertGreater(task['cooldownUntil'], __import__('time').time())
+            with self.assertRaisesRegex(ValueError, 'No supported task'): inventory.choose('during-cooldown')
+            recovery = capture_run(root / 'runs', 'recovery', success=True, include_script=True)
+            inventory.ingest(recovery)
+            self.assertEqual(inventory.choose('after-recovery')['task_id'], 'get-oak_log')
+            state = inventory.snapshot()['taskHealth'][0]
+            self.assertEqual(state['consecutive_failures'], 0)
+            self.assertEqual(state['failures'], 2)
