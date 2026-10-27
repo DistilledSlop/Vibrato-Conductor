@@ -41,6 +41,14 @@ class WorkerTests(unittest.TestCase):
             self.assertFalse(capture_evidence(root)['complete'])
             self.assertFalse(capture_evidence(root / 'missing')['complete'])
 
+    def test_world_loading_and_warmup_are_not_capacity_samples(self):
+        worker = Worker(Config.read({'RUN_ID':'warmup'}))
+        self.assertFalse(worker.measurement_ready({'worldReady':False,'worldReadySeconds':100}))
+        self.assertFalse(worker.measurement_ready({'worldReady':True,'worldReadySeconds':19.9}))
+        self.assertTrue(worker.measurement_ready({'worldReady':True,'worldReadySeconds':20}))
+        self.assertGreaterEqual(Config.read({'RUN_ID':'collection','MODE':'collection'}).collection_settle_seconds,
+                                worker.config.warmup_seconds + 20)
+
     def test_final_health_is_hashed_and_artifacts_freeze_at_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

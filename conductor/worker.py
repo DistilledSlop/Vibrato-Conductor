@@ -47,7 +47,8 @@ class Config:
     pillar_seconds: float = 45
     screenshots: bool = True
     screenshot_seconds: int = 15
-    collection_settle_seconds: float = 20
+    collection_settle_seconds: float = 45
+    warmup_seconds: float = 20
 
     @classmethod
     def read(cls, env=None):
@@ -82,7 +83,8 @@ class Config:
                    number(env, 'WATCHDOG_PILLAR_SECONDS', 45, 15, 600),
                    env.get('SCREENSHOTS', 'true') == 'true',
                    int(number(env, 'SCREENSHOT_SECONDS', 15, 5, 300)),
-                   number(env, 'COLLECTION_SETTLE_SECONDS', 20, 0, 120))
+                   number(env, 'COLLECTION_SETTLE_SECONDS', 45, 0, 120),
+                   number(env, 'WARMUP_SECONDS', 20, 0, 120))
 
 
 def capture_evidence(captures: Path) -> dict:
@@ -144,7 +146,7 @@ class Worker:
         self.resources = {}
         self.watchdog = Watchdog(config.stall_seconds, config.loop_seconds, config.pillar_seconds)
         self.finalized = False
-        self.lifetime_deadline = self.started + config.startup_seconds * 3 + config.seconds + 90
+        self.lifetime_deadline = self.started + config.startup_seconds * 3 + config.seconds + config.collection_settle_seconds + 90
 
     def stop_requested(self, *_): self.stopping = True
 
@@ -166,6 +168,10 @@ class Worker:
         try: return json.loads(path.read_text())
         except (OSError, ValueError): return None
 
+    def measurement_ready(self, data=None):
+        data = self.last_client if data is None else data
+        return bool(data and data.get('worldReady') and data.get('worldReadySeconds', 0) >= self.config.warmup_seconds)
+
     def sample_server(self):
         data = self.read_json(self.root / 'server-heartbeat.json')
         if not data or data.get('ticks') == self._last_server_ticks: return
@@ -175,7 +181,7 @@ class Worker:
             with (self.artifacts / 'server-heartbeats.jsonl').open('a') as stream:
                 stream.write(json.dumps(data) + '\n')
             atomic_json(self.artifacts / 'server-heartbeat.json', data)
-        if self.last_heartbeat is not None and isinstance(data.get('tps'), (int, float)):
+        if self.measurement_ready() and isinstance(data.get('tps'), (int, float)):
             self.server_measurements.append(data['tps'])
             self.server_rolling.append(data['tps'])
             if len(self.server_rolling) == 10 and mean(self.server_rolling) < 18:
@@ -230,6 +236,9 @@ class Worker:
             'maxTickMs': None if not self.last_server else self.last_server.get('maxTickMs'),
             'captureBytes': self.last_capture_bytes, 'resources': self.resources,
             'classification': self.classification,
+            'worldReady': bool(self.last_client and self.last_client.get('worldReady')),
+            'warmingUp': not self.measurement_ready(),
+            'capacityReady': self.measurement_ready() and len(self.server_measurements) >= 10 and len(self.client_measurements) >= 10,
             'screenshotWall': None if self._last_screenshot is None else self._last_screenshot.get('wall'),
             'screenshotAge': None if self._last_screenshot is None else max(0, time.time()-self._last_screenshot.get('wall', 0)),
         }
@@ -364,11 +373,12 @@ class Worker:
                     atomic_json(self.artifacts / 'heartbeat.json', data)
                     previous_mtime = stat.st_mtime_ns
                     self.last_client = data
-                    if isinstance(data.get('tps'), (int, float)): self.client_measurements.append(data['tps'])
+                    if self.measurement_ready(data) and isinstance(data.get('tps'), (int, float)): self.client_measurements.append(data['tps'])
                     self.last_heartbeat = now
                     self.heartbeat_count += 1
-                    joined_at = joined_at or now
-                    self.phase = 'running'
+                    if data.get('worldReady'):
+                        joined_at = joined_at or now
+                        self.phase = 'running'
             size = sum(p.stat().st_size for p in (self.artifacts / 'captures').glob('*.bin'))
             if size > self.last_capture_bytes:
                 self.last_capture_bytes, self.capture_at = size, now
@@ -389,7 +399,7 @@ class Worker:
             if self.last_heartbeat and now - self.last_heartbeat > self.config.heartbeat_seconds: return 'heartbeat_timeout'
             if joined_at and (not self.last_server or time.time() - self.last_server.get('wall', 0) > self.config.heartbeat_seconds):
                 return 'server_heartbeat_timeout'
-            assessment = self.watchdog.observe(self.last_client, self.last_server, self.resources, now)
+            assessment = self.watchdog.observe(self.last_client, self.last_server, self.resources, now) if self.measurement_ready() else None
             if assessment:
                 self.classification = assessment
                 self.phase = 'unhealthy'
