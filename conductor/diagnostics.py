@@ -130,3 +130,18 @@ def task_success(task, script):
     if task == '@nether' and script.get('finalDimension') != 'minecraft:the_nether': return False
     if task == '@gamer' and not script.get('creditsVisible'): return False
     return True
+
+
+def script_failure_reason(task, script):
+    """Keep task budget/command failures distinguishable from a normal client exit."""
+    if script.get('status') == 'load_error': return 'script_load_error'
+    commands = script.get('commands', [])
+    if any(c.get('status') == 'timeout' for c in commands): return 'task_budget_exceeded'
+    if any(c.get('status') == 'error' for c in commands): return 'task_command_error'
+    if task != 'director':
+        dispatch = next((c.get('seconds', 0) for c in reversed(commands) if c.get('action') == task), 0)
+        outcomes = [o for o in script.get('taskOutcomes', []) if o.get('seconds', -1) >= dispatch]
+        if any(o.get('status') == 'failed' for o in outcomes): return 'task_reported_failure'
+        if any(o.get('status') == 'cancelled' for o in outcomes): return 'task_cancelled'
+        if task_success(task, script) is not True: return 'task_success_unconfirmed'
+    return None

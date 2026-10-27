@@ -17,7 +17,7 @@ from statistics import mean
 from pathlib import Path
 
 from .storage import atomic_json, artifact_manifest, stage_world
-from .diagnostics import Watchdog, task_success
+from .diagnostics import Watchdog, task_success, script_failure_reason
 
 
 def number(env: dict, key: str, default: float, minimum: float, maximum: float) -> float:
@@ -460,6 +460,8 @@ class Worker:
         script_result = json.loads(script_result_path.read_text()) if script_result_path.exists() else {}
         script_ok = script_result.get('status') == 'exit' and all(
             c.get('status') not in ('timeout', 'error') for c in script_result.get('commands', []))
+        if reason == 'client_finished':
+            reason = script_failure_reason(self.config.task, script_result) or reason
         ok = reason == 'client_finished' and script_ok and self.heartbeat_count >= 3 and evidence['complete']
         ok = ok and all(self.children.get(name) is not None and self.children[name].returncode == 0
                         for name in ['client', 'proxy', 'server'])

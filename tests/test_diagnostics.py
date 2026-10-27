@@ -1,5 +1,5 @@
 import unittest
-from conductor.diagnostics import Watchdog, task_success
+from conductor.diagnostics import Watchdog, task_success, script_failure_reason
 
 
 def client(**changes):
@@ -71,6 +71,13 @@ class DiagnosticTests(unittest.TestCase):
         self.assertIsNone(dog.observe(client(rootTask=None,leafClass=None),None,{},0))
         self.assertIsNone(dog.observe(client(rootTask=None,leafClass=None),None,{},30))
         self.assertEqual(dog.observe(client(rootTask=None,leafClass=None),None,{},61)['reason'],'idle_without_active_task')
+
+    def test_script_timeout_cancel_and_error_keep_distinct_causes(self):
+        self.assertEqual(script_failure_reason('@nether', {'commands':[{'status':'timeout'}]}),'task_budget_exceeded')
+        self.assertEqual(script_failure_reason('@nether', {'commands':[{'status':'error'}]}),'task_command_error')
+        self.assertEqual(script_failure_reason('@nether', {'taskOutcomes':[{'seconds':2,'status':'cancelled'}]}),'task_cancelled')
+        self.assertEqual(script_failure_reason('@nether', {}),'task_success_unconfirmed')
+        self.assertIsNone(script_failure_reason('director', {}))
 
     def test_task_outcomes_need_success_evidence_and_goal(self):
         script={'status':'exit','commands':[{'action':'@nether','status':'completed','seconds':2}],
