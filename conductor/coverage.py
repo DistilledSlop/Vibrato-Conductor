@@ -286,7 +286,7 @@ class CoverageInventory:
                         permission_level = heartbeat.get('permissionLevel')
                         if (heartbeat.get('permissionSource') == 'server_observer' and isinstance(permission_level, int)
                                 and not isinstance(permission_level, bool) and 0 <= permission_level <= 4):
-                            operator = permission_level >= 2
+                            operator = permission_level >= 1
                             record('permission:' + ('operator' if operator else 'non_operator'), 'heartbeat:server_permission')
                             record('permission-level:' + str(permission_level), 'heartbeat:server_permission')
                             if actual_mode in ('survival', 'creative', 'adventure', 'spectator'):

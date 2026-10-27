@@ -232,4 +232,21 @@ class ModeCurriculumTests(unittest.TestCase):
             self.assertEqual(targets['permission:operator-command-success']['observedRuns'],0)
             self.assertEqual(targets['scenario:operator_commands']['observedRuns'],0)
 
+
+
+class LimitedOperatorTests(unittest.TestCase):
+    def test_level_one_is_limited_operator_and_not_non_operator(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            inventory = CoverageInventory(root / 'coverage.sqlite')
+            run = capture_run(root / 'runs')
+            (run / 'heartbeats.jsonl').write_text(json.dumps({'actualMode':'survival','permissionLevel':1,'permissionSource':'server_observer'})+'\n')
+            result=json.loads((run / 'result.json').read_text())
+            atomic_json(run / 'manifest.json',artifact_manifest(run,result))
+            inventory.ingest(run)
+            targets={t['id']:t for t in inventory.snapshot()['targets']}
+            self.assertEqual(targets['permission:operator']['observedRuns'],1)
+            self.assertEqual(targets['permission:non_operator']['observedRuns'],0)
+            self.assertEqual(targets['permission:operator-command-success']['observedRuns'],0)
+
 if __name__ == '__main__': unittest.main()
