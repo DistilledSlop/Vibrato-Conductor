@@ -197,6 +197,20 @@ class Fleet:
             self._event('target', f'Desired worker count set to {n}')
         return self.snapshot()
 
+    def resume(self):
+        """Audited operator retry after a diagnosis; never changes desired count or resource gates."""
+        with self._thread_lock, self.db:
+            self._set('circuit_until', 0)
+            self._set('next_start', 0)
+            self._set('consecutive_failures', 0)
+            if self._paused_reason in ('failure_backoff', 'failure_circuit_open'):
+                self._paused_reason = None
+            self._event('backoff_reset', 'Operator reset the failure circuit and retry backoff')
+        return self.snapshot()
+
+    def reset_backoff(self):
+        return self.resume()
+
     def stop_worker(self, run_id, replace=False):
         # Persist intent; the reconciler serializes potentially slow backend operations.
         with self._thread_lock, self.db:

@@ -303,6 +303,29 @@ class FleetTests(unittest.TestCase):
             self.assertEqual(self.fleet.reconcile()['pausedReason'], 'failure_backoff')
             self.assertEqual(len(self.runtime.creates), 1)
 
+    def test_operator_resume_clears_failures_without_bypassing_other_gates(self):
+        with self.fleet.db:
+            self.fleet._set('circuit_until', self.clock() + 100)
+            self.fleet._set('next_start', self.clock() + 100)
+            self.fleet._set('consecutive_failures', 5)
+        self.fleet.resume()
+        self.assertEqual(self.fleet.snapshot()['desired'], 0)
+        self.assertEqual(self.fleet.snapshot()['circuitUntil'], 0)
+        self.assertEqual(self.fleet._setting('consecutive_failures'), '0')
+        self.fleet.reconcile()
+        self.assertEqual(self.runtime.creates, [])
+        self.fleet.set_target(1)
+        self.fleet.set_inhibited('storage_backpressure')
+        self.fleet.reset_backoff()
+        self.assertEqual(self.fleet.reconcile()['pausedReason'], 'storage_backpressure')
+        self.assertEqual(self.runtime.creates, [])
+        self.fleet.set_inhibited(None)
+        with patch.object(self.fleet, '_capacity', return_value={'limit': 0, 'pressure': 'host_memory_pressure'}):
+            self.fleet.resume()
+            self.assertEqual(self.fleet.reconcile()['pausedReason'], 'host_memory_pressure')
+        self.assertEqual(self.runtime.creates, [])
+        self.assertTrue(any(e['kind'] == 'backoff_reset' for e in self.fleet.snapshot()['events']))
+
     def test_configuration_rejects_unsafe_identity_and_bad_limits(self):
         for data in ({'fleet_id': '../bad'}, {'cpus': float('nan')}, {'desired': 2, 'max_workers': 1},
                      {'accept_eula': 'false'}, {'world_ids': ['../bad'], 'world_bank': '/bank'}):
