@@ -23,4 +23,6 @@ Default limits are 4 CPUs and 6 GiB for the combined worker; these are initial s
 
 `--task '@nether'`, `--task '@gamer'`, or another single Vibrato command creates a bounded scripted diagnostic assignment. The default `director` runs seeded autonomous activity. A passed worker diagnostic proves the connection, telemetry, script exit, and flushed capture structure; it does not prove task success, coverage completeness, or sustainable capacity.
 
+Real single-worker diagnostics passed; see [the validation record](docs/validation-2026-10-27.md).
+
 See [worker operation](docs/worker.md) for storage, world banks, failure handling, testing, and remaining limitations.
