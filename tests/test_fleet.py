@@ -171,6 +171,19 @@ class FleetTests(unittest.TestCase):
         self.fleet.reconcile()
         self.assertEqual(self.runtime.stops, [first])
 
+    def test_rolling_game_cadence_prevents_raw_sample_flapping(self):
+        self.fleet.set_target(1)
+        run_id = self.fleet.reconcile()['workers'][0]['runId']
+        self.health(run_id, clientTps=16, serverTps=16, clientMeanTps=20, serverMeanTps=20,
+                    clientMeanTpsSamples=10, serverMeanTpsSamples=10)
+        self.assertEqual(self.fleet.reconcile()['counts']['healthy'], 1)
+        self.health(run_id, clientTps=20, serverTps=20, clientMeanTps=16, serverMeanTps=20,
+                    clientMeanTpsSamples=10, serverMeanTpsSamples=10)
+        self.assertEqual(self.fleet.reconcile()['counts']['healthy'], 0)
+        self.health(run_id, clientMeanTps=None, serverMeanTps=20,
+                    clientMeanTpsSamples=9, serverMeanTpsSamples=10)
+        self.assertEqual(self.fleet.reconcile()['counts']['healthy'], 0)
+
     def test_negative_seed_is_preserved_for_first_assignment(self):
         self.fleet.config.seed = -42
         self.fleet.set_target(1)

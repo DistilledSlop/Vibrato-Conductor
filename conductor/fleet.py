@@ -291,9 +291,11 @@ class Fleet:
         for key in ('heartbeatAge', 'captureAge', 'serverHeartbeatAge'):
             value = health.get(key)
             if not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= self.config.health_timeout: return False
-        for key in ('clientTps', 'serverTps'):
+        for raw, rolling in (('clientTps', 'clientMeanTps'), ('serverTps', 'serverMeanTps')):
+            key = rolling if rolling in health else raw
             value = health.get(key)
             if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 18: return False
+            if key == rolling and health.get(rolling + 'Samples', 0) < 10: return False
         return not health.get('classification')
 
     def _artifact_roots(self, run_id):
