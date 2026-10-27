@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sqlite3
 import subprocess
 import sys
 import time
@@ -111,6 +112,8 @@ class Test:
             'containers': [{'name': 'controller', 'volumeMounts': [{'name': 'world-bank', 'mountPath': '/world-bank', 'readOnly': True}]}],
         }}}}
         self.kube('-n', 'vibrato', 'patch', 'deployment', 'vibrato-controller', '--type=strategic', '-p', json.dumps(patch))
+        # ConfigMaps do not restart a Deployment when only their data changes.
+        self.kube('-n', 'vibrato', 'rollout', 'restart', 'deployment/vibrato-controller')
         self.kube('-n', 'vibrato', 'rollout', 'status', 'deployment/vibrato-controller', '--timeout=120s')
         self.forward_start()
         return catalog
@@ -189,7 +192,12 @@ def main():
     finally:
         if args.exercise:
             try: test.api('/api/fleet', {'desired': 0})
-            except Exception: pass
+            except Exception:
+                # Preserve the drain intent even if port-forward/controller restarted during failure.
+                database = STATE / 'controller/fleet/fleet.sqlite3'
+                if database.exists():
+                    with sqlite3.connect(database, timeout=30) as db:
+                        db.execute("UPDATE settings SET value='0' WHERE key='desired'")
         test.forward_stop()
 
 if __name__ == '__main__': main()
