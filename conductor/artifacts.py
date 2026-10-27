@@ -353,3 +353,41 @@ class ArtifactStore:
                     db.execute("UPDATE deliveries SET state='expired',error=NULL WHERE run_id=?", (run_id,))
                 self._usage_at = 0
         return removed
+
+    def prune_workspaces(self, workspace_root: Path, workers, successful_days: float = 1,
+                         failure_days: float = 7, dry_run: bool = True, now: float | None = None) -> list[str]:
+        """Remove only retained, definitively terminal, centrally verified worker worlds.
+
+        Workspace paths are derived solely from validated run ids below the supplied root. No caller-provided
+        artifact/workspace path from a worker record is trusted. Unknown or active directories stay untouched.
+        """
+        if (not math.isfinite(successful_days) or not math.isfinite(failure_days)
+                or successful_days < 0 or failure_days < successful_days):
+            raise ValueError('Failed worlds must be retained at least as long as successful worlds')
+        workspace_root = Path(workspace_root)
+        if workspace_root.is_symlink(): raise ValueError('Workspace root must not be a symlink')
+        if not workspace_root.is_dir(): return []
+        workspace_root = workspace_root.resolve()
+        now = time.time() if now is None else now
+        receipts = {row['run_id']: row for row in self.snapshot()['runs']}
+        removed = []
+        for worker in workers:
+            run_id = worker.get('runId', worker.get('run_id', ''))
+            if not isinstance(run_id, str) or not IDENTIFIER.fullmatch(run_id): continue
+            if worker.get('state') not in {'completed', 'failed', 'lost', 'cancelled'}: continue
+            receipt = receipts.get(run_id)
+            if receipt is None or receipt['state'] != 'delivered': continue
+            passed = receipt['quality']['diagnosticPassed'] and receipt['quality']['taskSuccess'] is not False
+            days = successful_days if passed else failure_days
+            terminal_at = worker.get('updatedWall', worker.get('updated', receipt['delivered_at']))
+            if not isinstance(terminal_at, (float, int)) or not math.isfinite(terminal_at): continue
+            if now - max(terminal_at, receipt['delivered_at']) < days * 86400: continue
+            workspace = workspace_root / run_id
+            if workspace.is_symlink() or not workspace.is_dir() or workspace.resolve().parent != workspace_root: continue
+            target = self.central_root / run_id
+            verify_manifest(target)
+            if digest(target / 'manifest.json') != receipt['manifest_sha']:
+                raise ValueError('Refusing world cleanup after central artifact corruption')
+            removed.append(run_id)
+            if not dry_run: shutil.rmtree(workspace)
+        return removed

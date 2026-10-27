@@ -177,3 +177,47 @@ class OrphanTests(unittest.TestCase):
             store.enqueue('killed-run')
             self.assertEqual(store.deliver_pending()[0]['state'], 'delivered')
             self.assertEqual(store.snapshot()['eligible'], 0)
+
+
+class WorkspaceRetentionTests(unittest.TestCase):
+    def test_only_old_terminal_delivered_worlds_are_deleted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            store = ArtifactStore(root / 'local', root / 'central', root / 'state')
+            workers = []
+            for run_id, passed, state in [('good', True, 'completed'), ('bad', False, 'failed'),
+                                          ('active', True, 'running'), ('pending', True, 'pending')]:
+                finalized(root / 'local', run_id, passed)
+                if run_id != 'pending': store.enqueue(run_id)
+                workspace = root / 'workspaces' / run_id
+                workspace.mkdir(parents=True)
+                (workspace / 'world.mca').write_bytes(b'world')
+                workers.append({'runId': run_id, 'state': state, 'updatedWall': time.time()})
+            store.deliver_pending(limit=10)
+            future = time.time() + 2 * 86400
+            self.assertEqual(store.prune_workspaces(root / 'workspaces', workers, now=future), ['good'])
+            self.assertTrue((root / 'workspaces/good').exists())
+            store.prune_workspaces(root / 'workspaces', workers, now=future, dry_run=False)
+            self.assertFalse((root / 'workspaces/good').exists())
+            for run_id in ['bad', 'active', 'pending']: self.assertTrue((root / 'workspaces' / run_id).exists())
+            self.assertTrue((root / 'central/good/manifest.json').exists())
+
+    def test_workspace_symlink_and_corrupt_central_copy_are_protected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            store = ArtifactStore(root / 'local', root / 'central', root / 'state')
+            finalized(root / 'local', 'test')
+            store.enqueue('test'); store.deliver_pending()
+            workspaces = root / 'workspaces'
+            workspaces.mkdir()
+            outside = root / 'precious'
+            outside.mkdir(); (outside / 'file').write_text('preserve')
+            (workspaces / 'test').symlink_to(outside, target_is_directory=True)
+            worker = {'runId': 'test', 'state': 'completed', 'updatedWall': time.time()}
+            future = time.time() + 2 * 86400
+            self.assertEqual(store.prune_workspaces(workspaces, [worker], now=future, dry_run=False), [])
+            self.assertTrue((outside / 'file').exists())
+            (workspaces / 'test').unlink(); (workspaces / 'test').mkdir()
+            (root / 'central/test/metadata.json').write_text('{}')
+            with self.assertRaises(ValueError): store.prune_workspaces(workspaces, [worker], now=future, dry_run=False)
+            self.assertTrue((workspaces / 'test').exists())
