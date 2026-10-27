@@ -84,7 +84,7 @@ def quality_report(root: Path) -> dict:
                     except ValueError: continue
                     if not isinstance(heartbeat, dict) or heartbeat.get('permissionSource') != 'server_observer': continue
                     actual_mode, actual_level = heartbeat.get('actualMode'), heartbeat.get('permissionLevel')
-                    if actual_mode not in ('survival', 'creative', 'adventure', 'spectator') or not isinstance(actual_level, int): continue
+                    if actual_mode not in ('survival', 'creative', 'adventure', 'spectator') or not isinstance(actual_level, int) or isinstance(actual_level, bool): continue
                     if actual_mode == expected_mode and actual_level == expected_level: observed_context = True
                     else: mismatched_context = True
         if (not valid_definition or not isinstance(context, dict) or context.get('valid') is not True

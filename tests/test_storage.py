@@ -75,4 +75,24 @@ class IntegrityTests(unittest.TestCase):
             atomic_json(root / 'manifest.json', {'schemaVersion': 1, 'result': {}, 'files': [{'path': '../outside', 'bytes': 0, 'sha256': ''}]})
             with self.assertRaisesRegex(ValueError, 'Unsafe'): verify_manifest(root)
 
+
+
+class WorldCurriculumTests(unittest.TestCase):
+    def test_bank_mode_and_operator_restrictions_are_explicit_and_strict(self):
+        from conductor.storage import inspect_world_bank
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            world = root / 'bank/clean/world'
+            world.mkdir(parents=True)
+            (world / 'level.dat').write_bytes(b'clean-template')
+            atomic_json(world.parent / 'world.json', {'gamemodes':['survival','adventure'],'allowOperator':False,'tags':['safe']})
+            metadata = inspect_world_bank(root / 'bank')[0]
+            self.assertEqual(metadata['gamemodes'],['survival','adventure'])
+            self.assertFalse(metadata['allowOperator'])
+            self.assertEqual(metadata['tags'],['safe'])
+            atomic_json(world.parent / 'world.json', {'gamemodes':'creative','allowOperator':'false'})
+            invalid = inspect_world_bank(root / 'bank')[0]
+            self.assertFalse(invalid['supported'])
+            self.assertIn('gamemodes',invalid['error'])
+
 if __name__ == '__main__': unittest.main()
