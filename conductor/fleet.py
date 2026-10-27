@@ -259,10 +259,15 @@ class Fleet:
         if now - health['wall'] > self.config.health_timeout: return 'stale_worker_health'
         phase = health.get('phase')
         classification = health.get('classification') or {}
-        if phase == 'unhealthy': return classification.get('reason') or 'worker_unhealthy'
+        warming = (health.get('warmingUp') is True or health.get('worldReady') is not True
+                   or health.get('capacityReady') is not True)
+        if phase == 'unhealthy':
+            if not (warming and classification.get('kind') == 'overload' and classification.get('confidence') == 'inferred'):
+                return classification.get('reason') or 'worker_unhealthy'
         if phase == 'failed': return classification.get('reason') or 'worker_failed'
         if phase == 'starting': return 'worker_startup_timeout' if age > self.config.startup_timeout else None
         if phase in ('stopping', 'completed'): return None
+        if warming and age > self.config.startup_timeout: return 'worker_capacity_warmup_timeout'
         for key in ('heartbeatAge', 'captureAge', 'serverHeartbeatAge'):
             if (not isinstance(health.get(key), (int, float)) or not math.isfinite(health[key])
                     or health[key] < 0 or health[key] > self.config.health_timeout):
@@ -277,6 +282,7 @@ class Fleet:
 
     def _healthy(self, health, state):
         if state != 'running' or not health or health.get('phase') != 'running': return False
+        if health.get('capacityReady') is not True or health.get('worldReady') is not True or health.get('warmingUp') is not False: return False
         wall = health.get('wall')
         if not isinstance(wall, (int, float)) or not math.isfinite(wall) or not 0 <= self.clock() - wall <= self.config.health_timeout:
             return False
@@ -320,7 +326,7 @@ class Fleet:
         spec.setdefault('seconds', self.config.seconds)
         spec.setdefault('worldId', None)
         self.db.execute('INSERT OR IGNORE INTO workers(run_id,backend_id,state,spec,created,updated) VALUES (?,?,?,?,?,?)',
-                        (run_id, value['backendId'], value['state'], json.dumps(spec), now, now))
+                        (run_id, value['backendId'], 'pending' if value['state'] in ('completed', 'failed') else value['state'], json.dumps(spec), now, now))
         self._event('adopted', 'Recovered an owned worker from the runtime', run_id)
 
     def _new_spec(self, run_id):
@@ -447,7 +453,9 @@ class Fleet:
                     except Exception as error:
                         with self.db: self._event('stop_error', str(error), run_id)
             else:
-                state = 'running' if health and health.get('phase') == 'running' else 'starting'
+                state = ('running' if health and health.get('phase') == 'running'
+                         and health.get('capacityReady') is True and health.get('worldReady') is True
+                         and health.get('warmingUp') is False else 'starting')
                 with self.db:
                     self.db.execute('UPDATE workers SET state=?,reason=NULL,unhealthy_since=NULL WHERE run_id=?', (state, run_id))
         self._last_capacity = self._capacity()

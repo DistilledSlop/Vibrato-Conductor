@@ -52,7 +52,8 @@ class FleetTests(unittest.TestCase):
         root = self.config.artifacts_dir / run_id
         root.mkdir(parents=True, exist_ok=True)
         data = {'runId': run_id, 'phase': 'running', 'wall': self.clock(), 'heartbeatAge': 0,
-                'captureAge': 0, 'serverHeartbeatAge': 0, 'clientTps': 20, 'serverTps': 20}
+                'captureAge': 0, 'serverHeartbeatAge': 0, 'clientTps': 20, 'serverTps': 20,
+                'worldReady': True, 'warmingUp': False, 'capacityReady': True}
         data.update(extra)
         atomic_json(root / 'health.json', data)
 
@@ -91,6 +92,25 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(len(self.runtime.creates), 1)
         self.assertEqual(result['counts']['active'], 1)
         self.assertEqual(result['desired'], 1)
+
+    def test_loading_and_warmup_never_count_as_healthy_or_trigger_timing_failure(self):
+        self.fleet.set_target(1)
+        run_id = self.fleet.reconcile()['workers'][0]['runId']
+        self.health(run_id, worldReady=False, warmingUp=True, capacityReady=False, clientTps=2, serverTps=10)
+        result = self.fleet.reconcile()
+        self.assertEqual(result['counts']['starting'], 1)
+        self.assertEqual(result['counts']['healthy'], 0)
+        self.assertEqual(self.runtime.stops, [])
+        self.health(run_id, worldReady=True, warmingUp=False, capacityReady=True)
+        self.assertEqual(self.fleet.reconcile()['counts']['healthy'], 1)
+
+    def test_adopted_terminal_runtime_is_not_completed_without_evidence(self):
+        spec = {'runId': 'adopted-001', 'task': 'director', 'seed': 1, 'seconds': 30}
+        self.runtime.workers['adopted-001'] = {'runId': 'adopted-001', 'backendId': 'existing',
+            'state': 'completed', 'spec': spec}
+        result = self.fleet.reconcile()
+        self.assertEqual(result['counts']['completed'], 0)
+        self.assertEqual(result['workers'][0]['state'], 'failed')
 
     def test_terminal_failure_replaced_with_fresh_id_and_backoff(self):
         self.fleet.set_target(1)
