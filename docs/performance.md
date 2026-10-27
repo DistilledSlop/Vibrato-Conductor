@@ -33,13 +33,15 @@ python3 scripts/optimization-eval.py summarize .state/artifacts/RUN_ID \
   --output .state/optimization-evaluation/RUN_ID.summary.json
 python3 scripts/optimization-eval.py compare \
   --baseline /mount/baseline/RUN_ID --candidate /mount/candidate/RUN_ID \
+  --baseline-monitor .state/optimization-evaluation/BASELINE.monitor.jsonl \
+  --candidate-monitor .state/optimization-evaluation/CANDIDATE.monitor.jsonl \
   --output .state/optimization-evaluation/comparison.json
 ```
 
 Summaries verify immutable manifests and retain client/server cadence, authoritative task/scenario outcomes, actual packet/content observations, quality reasons, CPU consumption for the complete worker cgroup, and cgroup memory. Optional Docker process monitoring sums RSS across the supervisor, client, server, proxy, display, and init processes. Shared pages may be counted by more than one process. Without those samples, RSS is explicitly unavailable; cgroup memory is not mislabeled as RSS. Kubernetes per-process RSS still needs its own observation path.
 
-Compare the same assignment, seed, immutable world revision, mode, permissions, render profile, source/jar hashes, resource limits, and budgets. Record startup and steady intervals separately. Repeat matched scenarios; one successful example does not establish rare behavior equivalence. Observation differences are review signals and may reflect nondeterminism.
+Compare the same assignment, seed, immutable world revision, mode, permissions, render profile, source/jar hashes, resource limits, and budgets. Monitor files must identify the corresponding run and consistent limits; when comparing several runs, supply one monitor per run in the same order. Missing or unbounded CPU/memory limits keep a pair unready for scenario review. Record startup and steady intervals separately. Repeat matched scenarios; one successful example does not establish rare behavior equivalence. Observation differences are review signals and may reflect nondeterminism.
 
 The report always leaves `behaviorEquivalent=false` and `behaviorValidation=unvalidated`. It lists missing required behavior scenarios, including physics, mob AI, redstone, containers, dimension changes, long progression tasks, and the explicit mode/permission curriculum. Those need scenario-specific authoritative evidence and review before a candidate can be promoted. Profiles are not automatically approved from a benchmark percentage.
 
-Current checkpoint: official artifacts and hashes were verified, staging and offline baseline analysis work, and focused tool tests pass. Candidate live performance/behavior validation is pending and no performance gain or equivalence is claimed.
+Current checkpoint: official artifacts and hashes were verified, staging and offline baseline analysis work, and focused tool tests pass. A FerriteCore derivative image was built and checked under its unprivileged runtime user: both mod copies match the pinned hashes, metadata is readable, and requesting collection still enters diagnostic mode. Candidate live performance/behavior validation is pending and no performance gain or equivalence is claimed.

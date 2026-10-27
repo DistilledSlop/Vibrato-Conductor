@@ -144,7 +144,7 @@ def build_profile(profile_name, base_image, tag, cache_dir, manifest_path=DEFAUL
     for mod in record['mods']:
         for side in ['game', 'server']:
             lines.append('COPY ' + json.dumps(['mods/' + mod['filename'], '/opt/' + side + '/mods/' + mod['filename']]))
-    lines.extend(['COPY optimization-profile.json /opt/optimization-profile.json',
+    lines.extend(['COPY --chmod=0444 optimization-profile.json /opt/optimization-profile.json',
                   'COPY finalize.py /opt/finalize-optimization.py',
                   'COPY guard.py /opt/conductor/optimization_guard.py',
                   'RUN python3 /opt/finalize-optimization.py',
@@ -202,6 +202,12 @@ def summarize_run(path, monitor=None):
     metadata = json.loads((root / 'metadata.json').read_text())
     resources = json_lines(root / 'resources.jsonl')
     monitoring = json_lines(Path(monitor)) if monitor else []
+    if monitoring:
+        run_id = metadata.get('runId', root.name)
+        limits = monitoring[0].get('runtimeLimits')
+        if (not isinstance(limits, dict) or any(sample.get('runId') != run_id
+                or sample.get('runtimeLimits') != limits for sample in monitoring)):
+            raise ValueError('Monitoring must identify this run and consistent runtime limits')
     def numbers(key): return [r[key] for r in resources if isinstance(r.get(key), (int, float)) and math.isfinite(r[key])]
     def peak(key): return max(numbers(key), default=None)
     cpu = peak('cpuUsageSeconds')
@@ -244,7 +250,8 @@ def comparison_report(baselines, candidates, manifest_path=DEFAULT_MANIFEST):
     for candidate in candidates:
         comparable = [base for base in baselines if base['context'] == candidate['context']]
         base = comparable[0] if comparable else next((b for b in baselines if b['context']['scenario'] == candidate['context']['scenario']), None)
-        mismatches = [] if base is None else [k for k in base['context'] if base['context'].get(k) != candidate['context'].get(k)]
+        mismatches = [] if base is None else [k for k in sorted(base['context'].keys() | candidate['context'].keys())
+                                              if base['context'].get(k) != candidate['context'].get(k)]
         delta = {}
         differences = {}
         if base:
@@ -259,12 +266,16 @@ def comparison_report(baselines, candidates, manifest_path=DEFAULT_MANIFEST):
         healthy = bool(base and all(run.get('diagnosticPassed') is True and run.get('taskSuccess') is True
             and (run.get('serverHealth') or {}).get('valid') is True and (run.get('clientHealth') or {}).get('valid') is True
             for run in [base, candidate]))
-        evidence = bool(healthy and not mismatches and candidate['optimizationMods'])
+        limits = candidate['context'].get('runtimeLimits') or {}
+        limits_proven = all(isinstance(limits.get(key), (int, float)) and math.isfinite(limits[key])
+                            and limits[key] > 0 for key in ('cpuCores', 'memoryBytes'))
+        evidence = bool(healthy and not mismatches and limits_proven and candidate['optimizationMods'])
         scenario = candidate['context']['scenario']
         matrix[scenario].append(evidence)
         pairs.append({'baseline': base['runId'] if base else None, 'candidate': candidate['runId'],
                       'sameStartingConditionsAndSoftware': bool(base and not mismatches),
                       'contextMismatches': mismatches, 'authoritativeOutcomesBothSucceeded': healthy,
+                      'matchedRuntimeLimitsProven': bool(base and not mismatches and limits_proven),
                       'metrics': delta, 'observationDifferences': differences,
                       'requiresBehaviorReview': True, 'evidenceReadyForScenarioReview': evidence})
     required = manifest['requiredBehaviorScenarios']
@@ -299,7 +310,8 @@ def sample_container(container, output, duration=180, interval=2):
                 fields = line.split(None, 2)
                 if len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit():
                     processes.append({'pid': int(fields[0]), 'rssBytes': int(fields[1]) * 1024, 'command': fields[2]})
-            stream.write(json.dumps({'wall': time.time(), 'containerId': info['Id'], 'runtimeLimits': runtime_limits,
+            stream.write(json.dumps({'wall': time.time(), 'containerId': info['Id'],
+                'runId': info['Config']['Labels'].get('dev.vibrato.conductor.run'), 'runtimeLimits': runtime_limits,
                 'aggregateProcessRssBytes': sum(p['rssBytes'] for p in processes), 'processes': processes}) + '\n')
             stream.flush()
             time.sleep(interval)
@@ -325,6 +337,8 @@ def main():
     compare = commands.add_parser('compare')
     compare.add_argument('--baseline', type=Path, nargs='+', required=True)
     compare.add_argument('--candidate', type=Path, nargs='*', default=[])
+    compare.add_argument('--baseline-monitor', type=Path, nargs='*', default=[])
+    compare.add_argument('--candidate-monitor', type=Path, nargs='*', default=[])
     compare.add_argument('--output', type=Path, required=True)
     sampling = commands.add_parser('sample')
     sampling.add_argument('--container', required=True); sampling.add_argument('--output', type=Path, required=True)
@@ -341,7 +355,11 @@ def main():
     elif args.command == 'summarize':
         value = summarize_run(args.run, args.monitor)
     else:
-        value = comparison_report([summarize_run(p) for p in args.baseline], [summarize_run(p) for p in args.candidate], args.manifest)
+        for runs, monitors in [(args.baseline, args.baseline_monitor), (args.candidate, args.candidate_monitor)]:
+            if monitors and len(monitors) != len(runs): raise ValueError('Supply one monitor per run, in the same order')
+        value = comparison_report(
+            [summarize_run(p, args.baseline_monitor[i] if args.baseline_monitor else None) for i, p in enumerate(args.baseline)],
+            [summarize_run(p, args.candidate_monitor[i] if args.candidate_monitor else None) for i, p in enumerate(args.candidate)], args.manifest)
     if getattr(args, 'output', None) and args.command not in ('stage', 'build'):
         atomic_json(args.output, value)
     print(json.dumps(value, indent=2))
