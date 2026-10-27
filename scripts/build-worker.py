@@ -39,7 +39,7 @@ def main():
         f'vibrato/build/server-mods/{telemetry_jars[0].name}': telemetry_jars[0],
         'Dockerfile': ROOT / 'worker/Dockerfile', 'install.py': ROOT / 'worker/install.py',
     }
-    for name in ('index.js', 'recorder.js', 'sanitize.js', 'package.json', 'package-lock.json'):
+    for name in ('index.js', 'recorder.js', 'sanitize.js', 'wire.js', 'package.json', 'package-lock.json'):
         inputs['proxy/' + name] = args.proxy / 'proxy' / name
     for source in (ROOT / 'conductor').glob('*.py'):
         inputs['conductor/' + source.name] = source
