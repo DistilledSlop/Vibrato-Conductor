@@ -87,7 +87,7 @@ class Test:
 
     def active(self):
         return [w for w in self.api()['workers'] if w['state'] in
-                ('pending', 'created', 'starting', 'running', 'unhealthy', 'stopping')]
+                ('pending', 'created', 'starting', 'running', 'unhealthy', 'stopping', 'missing')]
 
     def prepare_exercise(self):
         # A private test catalog keeps this reproducible without changing the shipped task budgets.

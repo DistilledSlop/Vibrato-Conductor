@@ -16,7 +16,7 @@ from pathlib import Path
 from .backends import BackendError, DockerBackend, KubernetesBackend, worker_env
 from .storage import verify_manifest
 
-ACTIVE = {'pending', 'created', 'starting', 'running', 'unhealthy', 'stopping'}
+ACTIVE = {'pending', 'created', 'starting', 'running', 'unhealthy', 'stopping', 'missing'}
 TERMINAL = {'completed', 'failed', 'lost', 'cancelled'}
 
 
@@ -245,7 +245,8 @@ class Fleet:
             path = self.config.artifacts_dir / run_id / 'health.json'
             data = json.loads(path.read_text())
             if data.get('runId') != run_id: return None
-            if not isinstance(data.get('wall'), (float, int)) or not math.isfinite(data['wall']): return None
+            if (not isinstance(data.get('wall'), (float, int)) or not math.isfinite(data['wall'])
+                    or not 0 <= data['wall'] <= self.clock() + self.config.health_timeout): return None
             return data
         except (OSError, ValueError, TypeError): return None
 
@@ -426,12 +427,29 @@ class Fleet:
                             self._record_failure(row, 'create_failed', now)
                             # Keep pending: the runtime may have accepted an ambiguous create request.
                     continue
+                if self.config.backend == 'kubernetes':
+                    # API absence after force deletion is not proof that the node already stopped a Pod.
+                    # Reserve its capacity until durable heartbeats have gone stale plus a quiescence grace.
+                    health = self._read_health(run_id)
+                    missing_since = row['unhealthy_since'] if row['unhealthy_since'] is not None else now
+                    last_health = health['wall'] if health else missing_since
+                    quiet_after = max(missing_since + self.config.health_timeout,
+                                      last_health + self.config.health_timeout + self.config.unhealthy_grace_seconds)
+                    if now < quiet_after:
+                        with self.db:
+                            reason = row['reason'] if row['reason'] in ('operator_stop', 'operator_replace', 'scale_down') else 'runtime_worker_unconfirmed_missing'
+                            self.db.execute('UPDATE workers SET state=?,reason=?,unhealthy_since=?,health=? WHERE run_id=?',
+                                ('missing', reason, missing_since, json.dumps(health) if health else None, run_id))
+                            if row['state'] != 'missing': self._event('runtime_missing', 'Runtime absent; reserving capacity until worker evidence is quiescent', run_id)
+                        continue
                 with self.db:
-                    reason = row['reason'] if row['state'] == 'stopping' else 'runtime_worker_missing'
-                    state = 'cancelled' if row['state'] == 'stopping' else 'lost'
+                    cancelled = row['reason'] in ('operator_stop', 'operator_replace', 'scale_down')
+                    reason = row['reason'] if cancelled else 'runtime_worker_missing'
+                    state = 'cancelled' if cancelled else 'lost'
                     self.db.execute('UPDATE workers SET state=?,updated=?,reason=? WHERE run_id=?', (state, now, reason, run_id))
                     self._event(state, reason, run_id)
                     self._record_failure(row, reason, now)
+
                 continue
             health = self._read_health(run_id)
             with self.db:
@@ -483,11 +501,11 @@ class Fleet:
                     self.db.execute('UPDATE workers SET state=?,reason=NULL,unhealthy_since=NULL WHERE run_id=?', (state, run_id))
         self._last_capacity = self._capacity()
         desired = int(self._setting('desired'))
-        active = list(self.db.execute("SELECT * FROM workers WHERE state IN ('pending','created','starting','running','unhealthy','stopping') ORDER BY created DESC"))
+        active = list(self.db.execute("SELECT * FROM workers WHERE state IN ('pending','created','starting','running','unhealthy','stopping','missing') ORDER BY created DESC"))
         # Scale down first; workers requested to stop do not allow an immediate replacement until absent/terminal.
-        remaining = [r for r in active if r['state'] != 'stopping']
+        remaining = [r for r in active if r['state'] not in ('stopping', 'missing')]
         excess = max(0, len(remaining) - min(desired, self._last_capacity['limit']))
-        for row in [r for r in active if r['state'] != 'stopping'][:excess]:
+        for row in remaining[:excess]:
             with self.db:
                 self.db.execute('UPDATE workers SET state=?,reason=? WHERE run_id=?', ('stopping', 'scale_down', row['run_id']))
                 self._event('scale_down', 'Stopping worker to meet desired count or resource budget', row['run_id'])

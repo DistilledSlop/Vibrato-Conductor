@@ -243,6 +243,31 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(result['pausedReason'], 'another_reconciler_active')
         self.assertEqual(self.runtime.creates, [])
 
+    def test_missing_kubernetes_pod_reserves_capacity_until_evidence_goes_quiet(self):
+        self.fleet.config.backend = 'kubernetes'
+        self.fleet.set_target(1)
+        run_id = self.fleet.reconcile()['workers'][0]['runId']
+        self.health(run_id)
+        del self.runtime.workers[run_id]
+        result = self.fleet.reconcile()
+        self.assertEqual(result['workers'][0]['state'], 'missing')
+        self.assertEqual(result['counts']['active'], 1)
+        self.assertEqual(len(self.runtime.creates), 1)
+        self.clock.advance(10)
+        self.health(run_id)  # a still-alive orphan extends the reservation
+        self.fleet.reconcile()
+        self.assertEqual(len(self.runtime.creates), 1)
+        self.clock.advance(12)
+        self.fleet.reconcile()
+        self.assertEqual(self.fleet.snapshot()['workers'][0]['state'], 'missing')
+        self.clock.advance(1)
+        result = self.fleet.reconcile()
+        self.assertEqual(result['workers'][0]['state'], 'lost')
+        self.assertEqual(len(self.runtime.creates), 1)
+        self.clock.advance(5)
+        self.fleet.reconcile()
+        self.assertEqual(len(self.runtime.creates), 2)
+
     def test_scheduler_cannot_silently_grant_invalid_operator_permissions(self):
         self.fleet.scheduler = SimpleNamespace(
             choose=lambda *a, **k: {'task': 'director', 'seed': 1, 'seconds': 30, 'operator': 'false'},
