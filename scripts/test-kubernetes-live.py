@@ -97,16 +97,16 @@ class Test:
         shutil.copytree(ROOT / 'catalogs', catalog, dirs_exist_ok=True)
         tasks = json.loads((catalog / 'tasks.json').read_text())
         for task in tasks['tasks']:
-            if task['id'] == 'director': task['seconds'] = 120
+            if task['id'] == 'get-dirt': task['seconds'] = 120
         (catalog / 'tasks.json').write_text(json.dumps(tasks, indent=2) + '\n')
         config_map = self.json_kube('-n', 'vibrato', 'get', 'configmap', 'vibrato-controller-config')
         config = json.loads(config_map['data']['fleet.json'])
         config.update({'desired': 0, 'image': self.image, 'max_workers': 1, 'cpus': 8, 'cpu_budget': 8,
             'accept_eula': True, 'accept_offline': True,
-            'enabled_tasks': ['director'], 'catalog_dir': '/data/live-test-catalog', 'seconds': 75,
+            'enabled_tasks': ['get-dirt'], 'mode': 'collection', 'catalog_dir': '/data/live-test-catalog', 'seconds': 75,
             'stagger_seconds': 3, 'reconcile_seconds': 2, 'failure_backoff_seconds': 3,
             'max_failure_backoff_seconds': 15, 'circuit_pause_seconds': 30,
-            'worker_env': {**config.get('worker_env', {}), 'LP_NUM_THREADS': '2'},
+            'worker_env': {**config.get('worker_env', {}), 'LP_NUM_THREADS': '2', 'COLLECTION_SETTLE_SECONDS': '120'},
             'unhealthy_grace_seconds': 5, 'world_bank_pvc': 'vibrato-world-bank',
             'world_bank': '/world-bank', 'world_ids': ['seed-424242'], 'allow_world_copy': True})
         patch = {'data': {'fleet.json': json.dumps(config, indent=2)}}
@@ -127,6 +127,7 @@ class Test:
         before = {str(p.relative_to(bank)): digest(p) for p in bank.rglob('*') if p.is_file()}
         catalog = self.prepare_exercise()
         if self.api()['desired'] != 0: raise RuntimeError('Live test requires an initially drained fleet')
+        self.api('/api/fleet/resume', {})
         self.api('/api/fleet', {'desired': 1})
         first = self.wait(lambda: next((w for w in self.active() if w.get('healthy')), None), 'first Kubernetes worker healthy')
         first_id = first['runId']
@@ -134,11 +135,16 @@ class Test:
         if self.healthy_pause:
             print(f'Healthy baseline inspection window: {self.healthy_pause}s', flush=True)
             time.sleep(self.healthy_pause)
-        # Existing assignment keeps 120s; only assignments selected after this restart use 75s.
+        # Existing worker keeps its 120s settle window; replacements get 90s after task success.
         tasks = json.loads((catalog / 'tasks.json').read_text())
         for task in tasks['tasks']:
-            if task['id'] == 'director': task['seconds'] = 75
+            if task['id'] == 'get-dirt': task['seconds'] = 75
         (catalog / 'tasks.json').write_text(json.dumps(tasks, indent=2) + '\n')
+        config_map = self.json_kube('-n', 'vibrato', 'get', 'configmap', 'vibrato-controller-config')
+        config = json.loads(config_map['data']['fleet.json'])
+        config['worker_env']['COLLECTION_SETTLE_SECONDS'] = '90'
+        self.kube('-n', 'vibrato', 'patch', 'configmap', 'vibrato-controller-config', '--type=merge', '-p',
+                  json.dumps({'data': {'fleet.json': json.dumps(config, indent=2)}}))
         self.controller_restart()
         self.wait(lambda: len(self.active()) == 1 and self.active()[0]['runId'] == first_id, 'adoption after controller restart', timeout=60)
         owned = self.json_kube('-n', 'vibrato', 'get', 'pods', '-l', 'dev.vibrato.conductor.fleet=cluster')['items']
@@ -153,6 +159,7 @@ class Test:
         completed = self.wait(lambda: next((w for w in self.api()['workers'] if w['runId'] == second_id and w['state'] == 'completed'), None),
                               'replacement completes a diagnostic', timeout=180)
         assert completed.get('result', {}).get('diagnosticPassed') is True
+        assert completed['result'].get('taskSuccess') is True, 'Dirt task must have a confirmed successful outcome'
         self.record('replacement_diagnostic_completed', runId=second_id,
                     capture=completed['result']['capture'], serverHealth=completed['result'].get('serverHealth'))
         self.api('/api/fleet', {'desired': 0})
