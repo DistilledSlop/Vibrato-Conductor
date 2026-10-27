@@ -9,6 +9,47 @@ def finite(value):
     return isinstance(value, (int, float)) and math.isfinite(value)
 
 
+class IntervalRate:
+    """Cumulative counter deltas avoid aliasing one-second snapshots sampled less frequently."""
+    def __init__(self, window=10):
+        self.previous = None
+        self.intervals = deque(maxlen=window)
+        self.total_count = 0
+        self.total_seconds = 0.0
+        self.samples = 0
+        self.latest = None
+        self.window = window
+
+    def update(self, count, seconds):
+        if not finite(count) or not finite(seconds): return None
+        current = (count, seconds)
+        if self.previous is None:
+            self.previous = current
+            return None
+        change, elapsed = count-self.previous[0], seconds-self.previous[1]
+        if change == 0 and elapsed == 0: return self.latest
+        self.previous = current
+        if change < 0 or elapsed <= 0:
+            self.intervals.clear()
+            self.latest = None
+            return None
+        self.intervals.append((change, elapsed))
+        self.total_count += change
+        self.total_seconds += elapsed
+        self.samples += 1
+        self.latest = change / elapsed
+        return self.latest
+
+    @property
+    def rolling(self):
+        if len(self.intervals) < self.window: return None
+        return sum(c for c,t in self.intervals) / sum(t for c,t in self.intervals)
+
+    @property
+    def average(self):
+        return self.total_count/self.total_seconds if self.total_seconds else None
+
+
 class Watchdog:
     def __init__(self, stall_seconds=600, loop_seconds=90, pillar_seconds=45):
         self.stall_seconds = stall_seconds
@@ -39,13 +80,15 @@ class Watchdog:
             self.client_tps.append(client['tps'])
             self.last_client_seconds = client.get('seconds')
         # Timing or resource pressure takes precedence over conclusions about bot behavior.
-        if len(self.server_tps) == 10 and mean(self.server_tps) < 18 and now - self.started >= 20:
+        server_mean = (server.get('rollingTps') if server else None) if server and 'rollingSamples' in server else (mean(self.server_tps) if len(self.server_tps)==10 else None)
+        client_mean = client.get('rollingTps') if 'rollingSamples' in client else (mean(self.client_tps) if len(self.client_tps)==10 else None)
+        if server_mean is not None and server_mean < 18 and now - self.started >= 20:
             return self.assessment('server_tick_overload', 'overload', 'inferred',
-                                   meanServerTps=mean(self.server_tps), samples=10,
+                                   meanServerTps=server_mean, samples=10,
                                    cpuPressure=resources.get('cpuPressure'), memoryPressure=resources.get('memoryPressure'))
-        if len(self.client_tps) == 10 and mean(self.client_tps) < 18 and now - self.started >= 20:
+        if client_mean is not None and client_mean < 18 and now - self.started >= 20:
             return self.assessment('client_tick_overload', 'overload', 'inferred',
-                                   meanClientTps=mean(self.client_tps), samples=10,
+                                   meanClientTps=client_mean, samples=10,
                                    cpuPressure=resources.get('cpuPressure'), memoryPressure=resources.get('memoryPressure'))
         if resources.get('memoryPressure') and resources.get('oomKills', 0) > 0:
             return self.assessment('worker_memory_exhausted', 'overload', 'confirmed', **resources)

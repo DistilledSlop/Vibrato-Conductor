@@ -1,5 +1,5 @@
 import unittest
-from conductor.diagnostics import Watchdog, task_success, script_failure_reason
+from conductor.diagnostics import IntervalRate, Watchdog, task_success, script_failure_reason
 
 
 def client(**changes):
@@ -11,6 +11,28 @@ def client(**changes):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_weighted_cumulative_rates_do_not_alias_skipped_one_second_windows(self):
+        rate=IntervalRate(window=2)
+        self.assertIsNone(rate.update(0,0))
+        self.assertEqual(rate.update(20,1),20)
+        self.assertEqual(rate.update(60,4),40/3)
+        self.assertEqual(rate.rolling,15)
+        self.assertEqual(rate.average,15)
+        self.assertEqual(rate.samples,2)
+        rate.update(60,4)
+        self.assertEqual(rate.samples,2)
+        self.assertIsNone(rate.update(1,5))
+        self.assertIsNone(rate.rolling)
+
+
+    def test_weighted_window_overrides_biased_raw_snapshot_rates(self):
+        dog=Watchdog()
+        for second in range(25):
+            self.assertIsNone(dog.observe(client(seconds=second,tps=8,rollingTps=19,rollingSamples=10),
+                {'ticks':second,'tps':8,'rollingTps':20,'rollingSamples':10},{},second))
+        self.assertEqual(dog.observe(client(seconds=26,tps=20,rollingTps=16,rollingSamples=10),
+                {'ticks':26,'tps':20,'rollingTps':20,'rollingSamples':10},{},26)['reason'],'client_tick_overload')
+
     def test_stationary_progress_is_not_stall_and_motion_is_not_progress(self):
         dog=Watchdog(stall_seconds=30)
         for second in range(60):

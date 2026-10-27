@@ -19,7 +19,7 @@ from statistics import mean
 from pathlib import Path
 
 from .storage import atomic_json, artifact_manifest, stage_world
-from .diagnostics import Watchdog, task_success, script_failure_reason
+from .diagnostics import IntervalRate, Watchdog, task_success, script_failure_reason
 
 
 def number(env: dict, key: str, default: float, minimum: float, maximum: float) -> float:
@@ -154,6 +154,8 @@ class Worker:
         self.last_server = None
         self._last_server_ticks = None
         self._last_screenshot = None
+        self.server_rate = IntervalRate()
+        self.client_rate = IntervalRate()
         self.server_measurements = deque(maxlen=86400)
         self.client_measurements = deque(maxlen=86400)
         self.client_rolling = deque(maxlen=10)
@@ -199,9 +201,11 @@ class Worker:
                 stream.write(json.dumps(data) + '\n')
             atomic_json(self.artifacts / 'server-heartbeat.json', data)
         if self.measurement_ready() and isinstance(data.get('tps'), (int, float)):
-            self.server_measurements.append(data['tps'])
-            self.server_rolling.append(data['tps'])
-            if len(self.server_rolling) == 10 and mean(self.server_rolling) < 18:
+            interval = self.server_rate.update(data.get('ticks'), data.get('monotonicSeconds', data.get('wall')))
+            if interval is not None:
+                self.server_measurements.append(interval)
+                self.server_rolling.append(interval)
+            if self.server_rate.rolling is not None and self.server_rate.rolling < 18:
                 self.degraded_server_windows += 1
 
     def sample_resources(self):
@@ -248,9 +252,12 @@ class Worker:
             'serverHeartbeatAge': server_age,
             'clientTps': None if not self.last_client else self.last_client.get('tps'),
             'serverTps': None if not self.last_server else self.last_server.get('tps'),
-            'clientMeanTps': mean(self.client_rolling) if len(self.client_rolling) >= 10 else None,
-            'serverMeanTps': mean(self.server_rolling) if len(self.server_rolling) >= 10 else None,
-            'clientMeanTpsSamples': len(self.client_rolling), 'serverMeanTpsSamples': len(self.server_rolling),
+            'clientMeanTps': self.client_rate.rolling, 'serverMeanTps': self.server_rate.rolling,
+            'clientIntervalTps': self.client_rate.latest, 'serverIntervalTps': self.server_rate.latest,
+            'clientMeanTpsSamples': len(self.client_rate.intervals), 'serverMeanTpsSamples': len(self.server_rate.intervals),
+            'clientTicks': None if not self.last_client else self.last_client.get('clientTicks'),
+            'serverTicks': None if not self.last_server else self.last_server.get('ticks'),
+            'tickRateMethod': 'cumulative_counter_delta_weighted_elapsed',
             'meanTickMs': None if not self.last_server else self.last_server.get('meanTickMs'),
             'serverMspt': None if not self.last_server else self.last_server.get('meanTickMs'),
             'maxTickMs': None if not self.last_server else self.last_server.get('maxTickMs'),
@@ -262,7 +269,7 @@ class Worker:
             'permissionSource': None if not self.last_client else self.last_client.get('permissionSource'),
             'assignedGamemode': self.config.gamemode, 'operator': self.config.operator,
             'warmingUp': not self.measurement_ready(),
-            'capacityReady': self.measurement_ready() and len(self.server_measurements) >= 10 and len(self.client_measurements) >= 10,
+            'capacityReady': self.measurement_ready() and self.server_rate.samples >= 10 and self.client_rate.samples >= 10,
             'screenshotWall': None if self._last_screenshot is None else self._last_screenshot.get('wall'),
             'screenshotAge': None if self._last_screenshot is None else max(0, time.time()-self._last_screenshot.get('wall', 0)),
         }
@@ -410,8 +417,10 @@ class Worker:
                     previous_mtime = stat.st_mtime_ns
                     self.last_client = data
                     if self.measurement_ready(data) and isinstance(data.get('tps'), (int, float)):
-                        self.client_measurements.append(data['tps'])
-                        self.client_rolling.append(data['tps'])
+                        interval = self.client_rate.update(data.get('clientTicks'), data.get('seconds'))
+                        if interval is not None:
+                            self.client_measurements.append(interval)
+                            self.client_rolling.append(interval)
                     self.last_heartbeat = now
                     self.heartbeat_count += 1
                     if data.get('worldReady'):
@@ -445,7 +454,11 @@ class Worker:
                         assignedMode=self.config.gamemode, actualMode=self.last_client.get('actualMode'),
                         assignedPermission=self.config.operator_level, actualPermission=self.last_client.get('permissionLevel'))
                     self.phase = 'unhealthy'; self.health(); return 'assignment_context_mismatch'
-            assessment = self.watchdog.observe(self.last_client, self.last_server, self.resources, now) if self.measurement_ready() else None
+            measured_client = {**(self.last_client or {}), 'tps': self.client_rate.latest,
+                               'rollingTps': self.client_rate.rolling, 'rollingSamples': len(self.client_rate.intervals)}
+            measured_server = {**(self.last_server or {}), 'tps': self.server_rate.latest,
+                               'rollingTps': self.server_rate.rolling, 'rollingSamples': len(self.server_rate.intervals)}
+            assessment = self.watchdog.observe(measured_client, measured_server, self.resources, now) if self.measurement_ready() else None
             if assessment:
                 self.classification = assessment
                 self.phase = 'unhealthy'
@@ -525,14 +538,14 @@ class Worker:
                              and self.last_client.get('permissionSource') == 'server_observer'
                              and self.last_client.get('permissionLevel') == self.config.operator_level)
         server_health = {
-            'samples': len(self.server_measurements),
-            'meanTps': mean(self.server_measurements) if self.server_measurements else None,
+            'samples': self.server_rate.samples, 'ticks': self.server_rate.total_count, 'seconds': self.server_rate.total_seconds,
+            'meanTps': self.server_rate.average, 'method': 'cumulative_counter_delta_weighted_elapsed',
             'degradedWindows': self.degraded_server_windows,
         }
         server_health['valid'] = (server_health['samples'] >= 10 and server_health['meanTps'] >= 18
                                   and not self.degraded_server_windows)
-        client_health = {'samples': len(self.client_measurements),
-                         'meanTps': mean(self.client_measurements) if self.client_measurements else None}
+        client_health = {'samples': self.client_rate.samples, 'ticks': self.client_rate.total_count, 'seconds': self.client_rate.total_seconds,
+                         'meanTps': self.client_rate.average, 'method': 'cumulative_counter_delta_weighted_elapsed'}
         client_health['valid'] = client_health['samples'] >= 10 and client_health['meanTps'] >= 18
         invalid = []
         if not context_valid: invalid.append('assignment_context_unconfirmed')

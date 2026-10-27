@@ -77,8 +77,9 @@ class WorkerTests(unittest.TestCase):
                 worker.heartbeat_count=3
                 worker.last_heartbeat=time.monotonic()
                 worker.capture_at=time.monotonic()
-                worker.server_measurements.extend([20]*10)
-                worker.client_measurements.extend([20]*10)
+                for second in range(11):
+                    worker.server_rate.update(second*20,second)
+                    worker.client_rate.update(second*20,second)
                 return 'client_finished'
             worker.prepare=prepare
             worker.launch=lambda *_: None

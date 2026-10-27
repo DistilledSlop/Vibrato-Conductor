@@ -30,10 +30,12 @@ def main():
     parser.add_argument('--gamemode',choices=['survival','creative','adventure','spectator'],default='survival')
     parser.add_argument('--operator',action='store_true')
     parser.add_argument('--operator-level',type=int,default=2)
+    parser.add_argument('--render-threads',type=int,help='Explicit Mesa llvmpipe thread count; visual settings remain unchanged')
     parser.add_argument('--accept-eula',action='store_true')
     parser.add_argument('--accept-offline',action='store_true')
     args=parser.parse_args()
     if not args.accept_eula or not args.accept_offline: parser.error('Explicit --accept-eula and --accept-offline are required')
+    if args.render_threads is not None and not 1 <= args.render_threads <= 64: parser.error('--render-threads must be1..64')
     state=args.state.resolve()
     config=FleetConfig.from_dict({
         'fleet_id':'telemetry-tests','state_dir':str(state/'control'),
@@ -41,7 +43,8 @@ def main():
         'world_bank':str(args.world_bank.resolve()),'allow_world_copy':True,
         'image':args.image,'cpus':args.cpus,'memory_mb':6144,'storage_mb':8192,
         'mode':args.mode,'seconds':args.seconds,'accept_eula':True,'accept_offline':True,
-        'worker_env':{'GAMEMODE':args.gamemode,'OPERATOR':str(args.operator).lower(),'OP_PERMISSION_LEVEL':str(args.operator_level),'REQUESTED_CPUS':str(args.cpus)},
+        'worker_env':{'GAMEMODE':args.gamemode,'OPERATOR':str(args.operator).lower(),'OP_PERMISSION_LEVEL':str(args.operator_level),'REQUESTED_CPUS':str(args.cpus),
+                      **({'LP_NUM_THREADS':str(args.render_threads)} if args.render_threads is not None else {})},
     })
     artifacts=config.artifacts_dir/args.id
     workspace=config.workspace_dir/args.id
