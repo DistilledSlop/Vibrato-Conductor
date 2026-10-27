@@ -59,6 +59,8 @@ class ArtifactTests(unittest.TestCase):
             self.assertNotEqual(result[0]['state'], 'delivered')
             self.assertFalse((root / 'central' / run.name).exists())
             self.assertEqual(store.snapshot()['delivered'], 0)
+            self.assertEqual(result[0]['state'], 'retry')
+            self.assertEqual(store.deliver_pending(limit=1)[0]['state'], 'delivered')
 
     def test_retention_protects_active_and_undelivered_runs_and_failed_evidence(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -221,3 +223,14 @@ class WorkspaceRetentionTests(unittest.TestCase):
             (root / 'central/test/metadata.json').write_text('{}')
             with self.assertRaises(ValueError): store.prune_workspaces(workspaces, [worker], now=future, dry_run=False)
             self.assertTrue((workspaces / 'test').exists())
+
+
+class DeliveryPerformanceTests(unittest.TestCase):
+    def test_duplicate_enqueue_does_not_rehash_old_capture_payloads(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = finalized(root / 'local')
+            store = ArtifactStore(root / 'local', root / 'central', root / 'state')
+            job = store.enqueue(run.name)
+            with patch('conductor.artifacts.verify_manifest', side_effect=AssertionError('Payloads should not be rehashed')):
+                self.assertEqual(store.enqueue(run.name)['manifest_sha'], job['manifest_sha'])

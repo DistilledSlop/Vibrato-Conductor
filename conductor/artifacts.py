@@ -161,6 +161,17 @@ class ArtifactStore:
     def enqueue(self, run_id: str) -> dict:
         if not IDENTIFIER.fullmatch(run_id): raise ValueError('Invalid run id')
         source = self.local_root / run_id
+        if source.is_symlink() or (source / 'manifest.json').is_symlink():
+            raise ValueError('Symlinked artifact source')
+        fingerprint = digest(source / 'manifest.json')
+        with self.lock, self._db() as db:
+            existing = db.execute('SELECT * FROM deliveries WHERE run_id=?', (run_id,)).fetchone()
+            if existing:
+                if existing['manifest_sha'] != fingerprint:
+                    raise ValueError('Run id already queued with a different manifest')
+                # Immutable manifest identity is cheap to check every controller tick. Payload hashes are checked
+                # on first queueing, actual delivery, retention, and explicit verification.
+                return dict(existing)
         result = verify_manifest(source)
         if result.get('runId') != run_id: raise ValueError('Artifact result does not match run directory identity')
         quality = quality_report(source)
@@ -229,9 +240,12 @@ class ArtifactStore:
                     if shutil.disk_usage(self.central_root).free < job['bytes']:
                         raise OSError('Central artifact filesystem has insufficient free space')
                     self._copy(source, stage)
-                    verify_manifest(stage)
-                    if digest(stage / 'manifest.json') != job['manifest_sha']:
-                        raise ValueError('Copied manifest differs')
+                    try:
+                        verify_manifest(stage)
+                        if digest(stage / 'manifest.json') != job['manifest_sha']:
+                            raise ValueError('Copied manifest differs')
+                    except ValueError as error:
+                        raise OSError('Copied artifacts failed integrity validation: ' + str(error)) from error
                     stage.replace(target)
                     descriptor = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
                     try: os.fsync(descriptor)
