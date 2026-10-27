@@ -1,4 +1,4 @@
-"""Local Docker commands for the first worker milestone."""
+"""Worker commands and the persistent fleet control service."""
 import argparse
 import json
 import os
@@ -54,7 +54,31 @@ def main():
     stop.add_argument('container')
     check = commands.add_parser('verify', help='Verify a finalized run manifest')
     check.add_argument('run', type=Path)
+    web = commands.add_parser('serve', help='Run the fleet reconciler, authenticated API, and dashboard')
+    web.add_argument('--config', type=Path, required=True)
+    web.add_argument('--host', default='127.0.0.1')
+    web.add_argument('--port', type=int, default=8080)
+    web.add_argument('--token-file', type=Path)
+    scale = commands.add_parser('scale', help='Change a running conductor fleet target')
+    scale.add_argument('target', type=int)
+    scale.add_argument('--url', default='http://127.0.0.1:8080')
+    scale.add_argument('--token-file', type=Path, default=Path('.state/fleet/dashboard.token'))
+    fleet_status = commands.add_parser('fleet-status', help='Inspect the running conductor API')
+    fleet_status.add_argument('--url', default='http://127.0.0.1:8080')
+    fleet_status.add_argument('--token-file', type=Path, default=Path('.state/fleet/dashboard.token'))
     args = parser.parse_args()
+    if args.command == 'serve':
+        from .web import serve
+        return serve(args.config, args.host, args.port, args.token_file)
+    if args.command in ('scale', 'fleet-status'):
+        import urllib.request
+        token = args.token_file.read_text().strip()
+        endpoint = '/api/fleet' if args.command == 'scale' else '/api/state'
+        body = json.dumps({'desired': args.target}).encode() if args.command == 'scale' else None
+        request = urllib.request.Request(args.url.rstrip('/') + endpoint, data=body,
+            headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
+        with urllib.request.urlopen(request, timeout=120) as response: print(response.read().decode())
+        return 0
     if args.command == 'status':
         return subprocess.call(['docker', 'ps', '-a', '--filter', 'label=' + LABEL,
                                 '--format', 'table {{.Names}}\t{{.Status}}\t{{.Image}}'])
