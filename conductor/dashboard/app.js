@@ -66,7 +66,7 @@ function createCard(w){
   return {card,image,status,stamp,runtime,world,task,leaf,metrics,lastFrame:0,worker:w};
 }
 function updateCard(ref,w){
-  ref.worker=w;ref.status.replaceChildren(pill(w.state));ref.runtime.textContent=age(w.createdWall);ref.world.textContent=w.worldId||'Fresh generated world';ref.task.textContent=workerTask(w);ref.leaf.textContent=heartbeat(w).leaf||w.reason||'Waiting for task telemetry';
+  ref.worker=w;ref.status.replaceChildren(pill(w.state));ref.runtime.textContent=age(w.createdWall);ref.world.textContent=(w.worldId||'Fresh generated world')+' · '+(w.gamemode||w.assignment?.gamemode||'survival')+(w.operator?' · operator':'');ref.task.textContent=workerTask(w);ref.leaf.textContent=heartbeat(w).leaf||w.reason||'Waiting for task telemetry';
   const ts=tps(w);ref.metrics.replaceChildren();for(const [label,value] of [['TPS',ts.server===null?'—':ts.server.toFixed(1)],['CAPTURE',bytes(captureBytes(w))],['DIM',String(heartbeat(w).dimension||'—').replace('minecraft:','')]]){const n=make('span');n.append(make('span','',label+' '),make('strong','',value));ref.metrics.append(n);}
   if(w.screenshot&&visible.has(w.runId))refreshThumbnail(w.runId);
 }

@@ -48,6 +48,7 @@ class Service:
         self.interval = interval
         self.retention = retention
         self.last_retention = 0
+        self.orphan_quiet = {}
         self.started = time.time()
         self.last_reconcile = None
         self.last_error = None
@@ -68,8 +69,24 @@ class Service:
             if (worker['state'] in ('failed', 'lost', 'cancelled') and run.is_dir()
                     and not run.is_symlink() and not (run / 'manifest.json').exists()):
                 try:
+                    confidence = 'confirmed'
+                    if worker['state'] == 'lost':
+                        health = read_json(run / 'health.json', {}) or {}
+                        wall = health.get('wall')
+                        if isinstance(wall, (int, float)) and time.time() - wall < self.fleet.config.health_timeout:
+                            continue
+                        signature = tuple(sorted((str(p.relative_to(run)), p.stat().st_size, p.stat().st_mtime_ns)
+                            for p in run.rglob('*') if p.is_file() and not p.is_symlink()))
+                        old = self.orphan_quiet.get(run_id)
+                        if old is None or old[0] != signature:
+                            self.orphan_quiet[run_id] = (signature, time.monotonic())
+                            continue
+                        if time.monotonic() - old[1] < 10: continue
+                        confidence = 'inferred'
                     self.artifacts.quarantine_orphan(run_id, worker.get('reason') or 'runtime_terminated',
-                        terminal=True, metadata={'assignment': worker.get('task'), 'seed': worker.get('seed')})
+                        terminal=True, confidence=confidence,
+                        metadata={'assignment': worker.get('task'), 'seed': worker.get('seed')})
+                    self.orphan_quiet.pop(run_id, None)
                 except Exception as error: errors.append(f'{run_id}: {error}')
         for entry in root.iterdir() if root.exists() else []:
             if entry.is_dir() and not entry.is_symlink() and RUN_ID.fullmatch(entry.name) and (entry / 'manifest.json').is_file():
@@ -331,15 +348,17 @@ def serve(config_path, host='127.0.0.1', port=8080, token_file=None):
     from .coverage import CoverageInventory
     from .artifacts import ArtifactStore
     config_data = json.loads(Path(config_path).read_text())
-    service_keys = {'central_dir', 'max_buffer_bytes', 'enabled_tasks', 'catalog_dir', 'delivery_retry_seconds',
+    service_keys = {'max_buffer_bytes', 'enabled_tasks', 'catalog_dir', 'delivery_retry_seconds',
                     'spool_success_days', 'spool_failure_days', 'central_diagnostic_days', 'central_failure_days',
                     'workspace_success_days', 'workspace_failure_days', 'max_central_bytes'}
-    config = FleetConfig.from_dict({k: v for k, v in config_data.items() if k not in service_keys})
+    fleet_data = {k: v for k, v in config_data.items() if k not in service_keys}
+    fleet_data.setdefault('central_dir', str(Path(fleet_data.get('state_dir', '.state/fleet')) / 'dataset'))
+    config = FleetConfig.from_dict(fleet_data)
     inventory = CoverageInventory(config.state_dir / 'coverage.sqlite3', world_bank=config.world_bank,
                                   catalog_path=config_data.get('catalog_dir'),
                                   enabled_tasks=config_data.get('enabled_tasks'))
     fleet = Fleet(config, scheduler=inventory)
-    central = Path(config_data.get('central_dir', config.state_dir / 'dataset')).resolve()
+    central = config.central_dir
     store = ArtifactStore(config.artifacts_dir, central, state_dir=config.state_dir / 'delivery',
                           max_buffer_bytes=int(config_data.get('max_buffer_bytes', 64 * 1024**3)),
                           retry_seconds=float(config_data.get('delivery_retry_seconds', 5)),
