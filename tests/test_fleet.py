@@ -59,7 +59,7 @@ class FleetTests(unittest.TestCase):
     def finalized(self, run_id, passed=True):
         root = self.config.artifacts_dir / run_id
         root.mkdir(parents=True, exist_ok=True)
-        result = {'diagnosticPassed': passed, 'reason': 'client_finished' if passed else 'crash'}
+        result = {'runId': run_id, 'diagnosticPassed': passed, 'reason': 'client_finished' if passed else 'crash'}
         atomic_json(root / 'result.json', result)
         atomic_json(root / 'manifest.json', artifact_manifest(root, result))
         self.runtime.workers[run_id]['state'] = 'completed' if passed else 'failed'
@@ -137,6 +137,23 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(self.runtime.stops, [run_id])
         self.assertEqual(len(self.runtime.creates), 1)
         self.assertEqual(self.fleet.snapshot()['workers'][0]['state'], 'cancelled')
+
+    def test_operator_stop_is_idempotent_and_does_not_stop_other_workers(self):
+        self.fleet.set_target(2)
+        first = self.fleet.reconcile()['workers'][0]['runId']
+        self.clock.advance(5)
+        self.fleet.reconcile()
+        self.fleet.stop_worker(first)
+        self.fleet.stop_worker(first)
+        self.assertEqual(self.fleet.snapshot()['desired'], 1)
+        self.fleet.reconcile()
+        self.assertEqual(self.runtime.stops, [first])
+
+    def test_negative_seed_is_preserved_for_first_assignment(self):
+        self.fleet.config.seed = -42
+        self.fleet.set_target(1)
+        self.fleet.reconcile()
+        self.assertEqual(self.runtime.creates[0]['seed'], -42)
 
     def test_external_storage_backpressure_blocks_start_but_not_monitoring(self):
         self.fleet.set_target(1)

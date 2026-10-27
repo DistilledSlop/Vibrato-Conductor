@@ -14,7 +14,7 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 from .backends import BackendError, DockerBackend, KubernetesBackend
-from .storage import digest
+from .storage import verify_manifest
 
 ACTIVE = {'pending', 'created', 'starting', 'running', 'unhealthy', 'stopping'}
 TERMINAL = {'completed', 'failed', 'lost', 'cancelled'}
@@ -201,7 +201,7 @@ class Fleet:
         with self._thread_lock, self.db:
             row = self.db.execute('SELECT * FROM workers WHERE run_id=?', (run_id,)).fetchone()
             if row is None: raise KeyError(run_id)
-            if row['state'] not in ACTIVE: return self.snapshot()
+            if row['state'] not in ACTIVE or row['state'] == 'stopping': return self.snapshot()
             if not replace: self._set('desired', max(0, int(self._setting('desired')) - 1))
             reason = 'operator_replace' if replace else 'operator_stop'
             self.db.execute('UPDATE workers SET state=?,reason=?,updated=? WHERE run_id=?',
@@ -291,12 +291,9 @@ class Fleet:
     def _verify_result(self, row):
         root = self.config.artifacts_dir / row['run_id']
         try:
-            manifest = json.loads((root / 'manifest.json').read_text())
-            for entry in manifest['files']:
-                path = root / entry['path']
-                if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()): raise ValueError('Unsafe path')
-                if path.stat().st_size != entry['bytes'] or digest(path) != entry['sha256']: raise ValueError('Artifact corruption')
-            return manifest['result']
+            result = verify_manifest(root)
+            if result.get('runId') != row['run_id']: raise ValueError('Artifact run identity differs')
+            return result
         except (OSError, ValueError, KeyError, TypeError): return None
 
     def _record_failure(self, row, reason, now):
@@ -333,7 +330,7 @@ class Fleet:
         else:
             number = self.db.execute('SELECT COUNT(*) FROM workers').fetchone()[0]
             spec = {'task': self.config.task, 'seconds': self.config.seconds,
-                    'seed': (self.config.seed + number) % (2**63),
+                    'seed': ((self.config.seed + number + 2**63) % (2**64)) - 2**63,
                     'worldId': self.config.world_ids[number % len(self.config.world_ids)] if self.config.world_ids else None}
         spec.update(runId=run_id, mode=self.config.mode)
         spec.setdefault('seconds', self.config.seconds)
@@ -457,7 +454,8 @@ class Fleet:
         desired = int(self._setting('desired'))
         active = list(self.db.execute("SELECT * FROM workers WHERE state IN ('pending','created','starting','running','unhealthy','stopping') ORDER BY created DESC"))
         # Scale down first; workers requested to stop do not allow an immediate replacement until absent/terminal.
-        excess = max(0, len(active) - min(desired, self._last_capacity['limit']))
+        remaining = [r for r in active if r['state'] != 'stopping']
+        excess = max(0, len(remaining) - min(desired, self._last_capacity['limit']))
         for row in [r for r in active if r['state'] != 'stopping'][:excess]:
             with self.db:
                 self.db.execute('UPDATE workers SET state=?,reason=? WHERE run_id=?', ('stopping', 'scale_down', row['run_id']))
