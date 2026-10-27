@@ -99,7 +99,8 @@ class Test:
         (catalog / 'tasks.json').write_text(json.dumps(tasks, indent=2) + '\n')
         config_map = self.json_kube('-n', 'vibrato', 'get', 'configmap', 'vibrato-controller-config')
         config = json.loads(config_map['data']['fleet.json'])
-        config.update({'desired': 0, 'max_workers': 1, 'accept_eula': True, 'accept_offline': True,
+        config.update({'desired': 0, 'max_workers': 1, 'cpus': 8, 'cpu_budget': 8,
+            'accept_eula': True, 'accept_offline': True,
             'enabled_tasks': ['director'], 'catalog_dir': '/data/live-test-catalog', 'seconds': 45,
             'stagger_seconds': 3, 'reconcile_seconds': 2, 'failure_backoff_seconds': 3,
             'max_failure_backoff_seconds': 15, 'circuit_pause_seconds': 30,
