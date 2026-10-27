@@ -1,0 +1,23 @@
+{
+  "fleet_id": "local",
+  "backend": "docker",
+  "state_dir": ".state/fleet",
+  "artifacts_dir": ".state/artifacts",
+  "workspace_dir": ".state/workspaces",
+  "image": "vibrato-worker:dev",
+  "desired": 0,
+  "max_workers": 1,
+  "cpus": 4,
+  "memory_mb": 6144,
+  "storage_mb": 8192,
+  "cpu_budget": 4,
+  "memory_budget_mb": 6144,
+  "storage_budget_mb": 8192,
+  "stagger_seconds": 15,
+  "startup_timeout": 360,
+  "health_timeout": 45,
+  "seconds": 300,
+  "mode": "diagnostic",
+  "accept_eula": false,
+  "accept_offline": false
+}

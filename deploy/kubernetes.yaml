@@ -1,0 +1,198 @@
+# Provision the claims in pvc.yaml (or kind-storage.yaml for a one-node local test)
+# and create the vibrato-dashboard-token Secret before starting the controller.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vibrato
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vibrato-controller
+  namespace: vibrato
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vibrato-controller
+  namespace: vibrato
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vibrato-controller
+  namespace: vibrato
+subjects:
+  - kind: ServiceAccount
+    name: vibrato-controller
+    namespace: vibrato
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vibrato-controller
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vibrato-controller-config
+  namespace: vibrato
+data:
+  fleet.json: |
+    {
+      "fleet_id": "cluster",
+      "backend": "kubernetes",
+      "namespace": "vibrato",
+      "state_dir": "/data/fleet",
+      "workspace_dir": "/data/workspaces",
+      "artifacts_dir": "/artifacts",
+      "artifacts_pvc": "vibrato-artifacts",
+      "image": "vibrato-worker:dev",
+      "desired": 0,
+      "max_workers": 1,
+      "cpus": 4,
+      "memory_mb": 6144,
+      "storage_mb": 8192,
+      "cpu_budget": 4,
+      "memory_budget_mb": 6144,
+      "storage_budget_mb": 8192,
+      "stagger_seconds": 15,
+      "startup_timeout": 360,
+      "health_timeout": 45,
+      "seconds": 300,
+      "mode": "diagnostic",
+      "accept_eula": false,
+      "accept_offline": false
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vibrato-controller
+  namespace: vibrato
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vibrato-controller
+  template:
+    metadata:
+      labels:
+        app: vibrato-controller
+    spec:
+      serviceAccountName: vibrato-controller
+      terminationGracePeriodSeconds: 100
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: controller
+          image: vibrato-controller:dev
+          imagePullPolicy: IfNotPresent
+          command: ["python3", "-m", "conductor", "serve", "--config", "/config/fleet.json", "--host", "0.0.0.0", "--port", "8080", "--token-file", "/secrets/token"]
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+              ephemeral-storage: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+              ephemeral-storage: "1Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 24
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: state
+              mountPath: /data
+            - name: artifacts
+              mountPath: /artifacts
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: token
+              mountPath: /secrets
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: state
+          persistentVolumeClaim:
+            claimName: vibrato-state
+        - name: artifacts
+          persistentVolumeClaim:
+            claimName: vibrato-artifacts
+        - name: config
+          configMap:
+            name: vibrato-controller-config
+        - name: token
+          secret:
+            secretName: vibrato-dashboard-token
+            defaultMode: 0440
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vibrato-controller
+  namespace: vibrato
+spec:
+  type: ClusterIP
+  selector:
+    app: vibrato-controller
+  ports:
+    - port: 8080
+      targetPort: http
+      name: http
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: isolate-recording-workers
+  namespace: vibrato
+spec:
+  podSelector:
+    matchLabels:
+      dev.vibrato.conductor.worker: "true"
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []

@@ -1,0 +1,28 @@
+# Use storage classes that support these access modes. In particular, the artifact
+# claim must be backed by shared RWX storage for workers on multiple nodes.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vibrato
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vibrato-state
+  namespace: vibrato
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vibrato-artifacts
+  namespace: vibrato
+spec:
+  accessModes: [ReadWriteMany]
+  resources:
+    requests:
+      storage: 50Gi

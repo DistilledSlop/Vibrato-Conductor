@@ -1,0 +1,87 @@
+# Local test only: kind node extraMounts must map the host test state directory
+# to /conductor-state. This hostPath storage is not shared across cluster nodes.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vibrato
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: vibrato-test-state
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: vibrato-test
+  hostPath:
+    path: /conductor-state/controller
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vibrato-state
+  namespace: vibrato
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: vibrato-test
+  volumeName: vibrato-test-state
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: vibrato-test-artifacts
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: vibrato-test
+  hostPath:
+    path: /conductor-state/artifacts
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vibrato-artifacts
+  namespace: vibrato
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: vibrato-test
+  volumeName: vibrato-test-artifacts
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: vibrato-test-world-bank
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes: [ReadOnlyMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: vibrato-test
+  hostPath:
+    path: /conductor-world-bank
+    type: Directory
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vibrato-world-bank
+  namespace: vibrato
+spec:
+  accessModes: [ReadOnlyMany]
+  storageClassName: vibrato-test
+  volumeName: vibrato-test-world-bank
+  resources:
+    requests:
+      storage: 50Gi
