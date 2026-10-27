@@ -1,0 +1,2198 @@
+{
+  "protocol": 767,
+  "minecraftVersion": "1.21.1",
+  "source": {
+    "title": "Minecraft Wiki: Projects/wiki.vg merge/Protocol",
+    "url": "https://minecraft.wiki/w/Minecraft_Wiki:Projects/wiki.vg_merge/Protocol",
+    "license": "CC BY-SA 3.0 Unported",
+    "licenseUrl": "https://creativecommons.org/licenses/by-sa/3.0/",
+    "note": "Packet names and IDs extracted from the user-provided page; packet classes and type constants reconciled with Minecraft 1.21.1 Yarn build.3 registrations."
+  },
+  "packets": [
+    {
+      "state": "handshaking",
+      "direction": "serverbound",
+      "id": 0,
+      "name": "Handshake",
+      "packetType": "HandshakePackets.INTENTION",
+      "class": "net.minecraft.network.packet.c2s.handshake.HandshakeC2SPacket",
+      "resource": "intention",
+      "identifier": "minecraft:intention"
+    },
+    {
+      "state": "handshaking",
+      "direction": "serverbound",
+      "id": 254,
+      "name": "Legacy Server List Ping",
+      "legacy": true
+    },
+    {
+      "state": "status",
+      "direction": "clientbound",
+      "id": 0,
+      "name": "Status Response",
+      "packetType": "StatusPackets.STATUS_RESPONSE",
+      "class": "net.minecraft.network.packet.s2c.query.QueryResponseS2CPacket",
+      "resource": "status_response",
+      "identifier": "minecraft:status_response"
+    },
+    {
+      "state": "status",
+      "direction": "clientbound",
+      "id": 1,
+      "name": "Pong Response (status)",
+      "packetType": "PingPackets.PONG_RESPONSE",
+      "class": "net.minecraft.network.packet.s2c.query.PingResultS2CPacket",
+      "resource": "pong_response",
+      "identifier": "minecraft:pong_response"
+    },
+    {
+      "state": "status",
+      "direction": "serverbound",
+      "id": 0,
+      "name": "Status Request",
+      "packetType": "StatusPackets.STATUS_REQUEST",
+      "class": "net.minecraft.network.packet.c2s.query.QueryRequestC2SPacket",
+      "resource": "status_request",
+      "identifier": "minecraft:status_request"
+    },
+    {
+      "state": "status",
+      "direction": "serverbound",
+      "id": 1,
+      "name": "Ping Request (status)",
+      "packetType": "PingPackets.PING_REQUEST",
+      "class": "net.minecraft.network.packet.c2s.query.QueryPingC2SPacket",
+      "resource": "ping_request",
+      "identifier": "minecraft:ping_request"
+    },
+    {
+      "state": "login",
+      "direction": "clientbound",
+      "id": 0,
+      "name": "Disconnect (login)",
+      "packetType": "LoginPackets.LOGIN_DISCONNECT",
+      "class": "net.minecraft.network.packet.s2c.login.LoginDisconnectS2CPacket",
+      "resource": "login_disconnect",
+      "identifier": "minecraft:login_disconnect"
+    },
+    {
+      "state": "login",
+      "direction": "clientbound",
+      "id": 1,
+      "name": "Encryption Request",
+      "packetType": "LoginPackets.HELLO_S2C",
+      "class": "net.minecraft.network.packet.s2c.login.LoginHelloS2CPacket",
+      "resource": "hello",
+      "identifier": "minecraft:hello"
+    },
+    {
+      "state": "login",
+      "direction": "clientbound",
+      "id": 2,
+      "name": "Login Success",
+      "packetType": "LoginPackets.GAME_PROFILE",
+      "class": "net.minecraft.network.packet.s2c.login.LoginSuccessS2CPacket",
+      "resource": "game_profile",
+      "identifier": "minecraft:game_profile"
+    },
+    {
+      "state": "login",
+      "direction": "clientbound",
+      "id": 3,
+      "name": "Set Compression",
+      "packetType": "LoginPackets.LOGIN_COMPRESSION",
+      "class": "net.minecraft.network.packet.s2c.login.LoginCompressionS2CPacket",
+      "resource": "login_compression",
+      "identifier": "minecraft:login_compression"
+    },
+    {
+      "state": "login",
+      "direction": "clientbound",
+      "id": 4,
+      "name": "Login Plugin Request",
+      "packetType": "LoginPackets.CUSTOM_QUERY",
+      "class": "net.minecraft.network.packet.s2c.login.LoginQueryRequestS2CPacket",
+      "resource": "custom_query",
+      "identifier": "minecraft:custom_query"
+    },
+    {
+      "state": "login",
+      "direction": "clientbound",
+      "id": 5,
+      "name": "Cookie Request (login)",
+      "packetType": "CookiePackets.COOKIE_REQUEST",
+      "class": "net.minecraft.network.packet.s2c.common.CookieRequestS2CPacket",
+      "resource": "cookie_request",
+      "identifier": "minecraft:cookie_request"
+    },
+    {
+      "state": "login",
+      "direction": "serverbound",
+      "id": 0,
+      "name": "Login Start",
+      "packetType": "LoginPackets.HELLO_C2S",
+      "class": "net.minecraft.network.packet.c2s.login.LoginHelloC2SPacket",
+      "resource": "hello",
+      "identifier": "minecraft:hello"
+    },
+    {
+      "state": "login",
+      "direction": "serverbound",
+      "id": 1,
+      "name": "Encryption Response",
+      "packetType": "LoginPackets.KEY",
+      "class": "net.minecraft.network.packet.c2s.login.LoginKeyC2SPacket",
+      "resource": "key",
+      "identifier": "minecraft:key"
+    },
+    {
+      "state": "login",
+      "direction": "serverbound",
+      "id": 2,
+      "name": "Login Plugin Response",
+      "packetType": "LoginPackets.CUSTOM_QUERY_ANSWER",
+      "class": "net.minecraft.network.packet.c2s.login.LoginQueryResponseC2SPacket",
+      "resource": "custom_query_answer",
+      "identifier": "minecraft:custom_query_answer"
+    },
+    {
+      "state": "login",
+      "direction": "serverbound",
+      "id": 3,
+      "name": "Login Acknowledged",
+      "packetType": "LoginPackets.LOGIN_ACKNOWLEDGED",
+      "class": "net.minecraft.network.packet.c2s.login.EnterConfigurationC2SPacket",
+      "resource": "login_acknowledged",
+      "identifier": "minecraft:login_acknowledged"
+    },
+    {
+      "state": "login",
+      "direction": "serverbound",
+      "id": 4,
+      "name": "Cookie Response (login)",
+      "packetType": "CookiePackets.COOKIE_RESPONSE",
+      "class": "net.minecraft.network.packet.c2s.common.CookieResponseC2SPacket",
+      "resource": "cookie_response",
+      "identifier": "minecraft:cookie_response"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 0,
+      "name": "Cookie Request (configuration)",
+      "packetType": "CookiePackets.COOKIE_REQUEST",
+      "class": "net.minecraft.network.packet.s2c.common.CookieRequestS2CPacket",
+      "resource": "cookie_request",
+      "identifier": "minecraft:cookie_request"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 1,
+      "name": "Clientbound Plugin Message (configuration)",
+      "packetType": "CommonPackets.CUSTOM_PAYLOAD_S2C",
+      "class": "net.minecraft.network.packet.s2c.common.CustomPayloadS2CPacket",
+      "resource": "custom_payload",
+      "identifier": "minecraft:custom_payload"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 2,
+      "name": "Disconnect (configuration)",
+      "packetType": "CommonPackets.DISCONNECT",
+      "class": "net.minecraft.network.packet.s2c.common.DisconnectS2CPacket",
+      "resource": "disconnect",
+      "identifier": "minecraft:disconnect"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 3,
+      "name": "Finish Configuration",
+      "packetType": "ConfigPackets.FINISH_CONFIGURATION_S2C",
+      "class": "net.minecraft.network.packet.s2c.config.ReadyS2CPacket",
+      "resource": "finish_configuration",
+      "identifier": "minecraft:finish_configuration"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 4,
+      "name": "Clientbound Keep Alive (configuration)",
+      "packetType": "CommonPackets.KEEP_ALIVE_S2C",
+      "class": "net.minecraft.network.packet.s2c.common.KeepAliveS2CPacket",
+      "resource": "keep_alive",
+      "identifier": "minecraft:keep_alive"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 5,
+      "name": "Ping (configuration)",
+      "packetType": "CommonPackets.PING",
+      "class": "net.minecraft.network.packet.s2c.common.CommonPingS2CPacket",
+      "resource": "ping",
+      "identifier": "minecraft:ping"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 6,
+      "name": "Reset Chat",
+      "packetType": "ConfigPackets.RESET_CHAT",
+      "class": "net.minecraft.network.packet.s2c.config.ResetChatS2CPacket",
+      "resource": "reset_chat",
+      "identifier": "minecraft:reset_chat"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 7,
+      "name": "Registry Data",
+      "packetType": "ConfigPackets.REGISTRY_DATA",
+      "class": "net.minecraft.network.packet.s2c.config.DynamicRegistriesS2CPacket",
+      "resource": "registry_data",
+      "identifier": "minecraft:registry_data"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 8,
+      "name": "Remove Resource Pack (configuration)",
+      "packetType": "CommonPackets.RESOURCE_PACK_POP",
+      "class": "net.minecraft.network.packet.s2c.common.ResourcePackRemoveS2CPacket",
+      "resource": "resource_pack_pop",
+      "identifier": "minecraft:resource_pack_pop"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 9,
+      "name": "Add Resource Pack (configuration)",
+      "packetType": "CommonPackets.RESOURCE_PACK_PUSH",
+      "class": "net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket",
+      "resource": "resource_pack_push",
+      "identifier": "minecraft:resource_pack_push"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 10,
+      "name": "Store Cookie (configuration)",
+      "packetType": "CommonPackets.STORE_COOKIE",
+      "class": "net.minecraft.network.packet.s2c.common.StoreCookieS2CPacket",
+      "resource": "store_cookie",
+      "identifier": "minecraft:store_cookie"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 11,
+      "name": "Transfer (configuration)",
+      "packetType": "CommonPackets.TRANSFER",
+      "class": "net.minecraft.network.packet.s2c.common.ServerTransferS2CPacket",
+      "resource": "transfer",
+      "identifier": "minecraft:transfer"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 12,
+      "name": "Feature Flags",
+      "packetType": "ConfigPackets.UPDATE_ENABLED_FEATURES",
+      "class": "net.minecraft.network.packet.s2c.config.FeaturesS2CPacket",
+      "resource": "update_enabled_features",
+      "identifier": "minecraft:update_enabled_features"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 13,
+      "name": "Update Tags (configuration)",
+      "packetType": "CommonPackets.UPDATE_TAGS",
+      "class": "net.minecraft.network.packet.s2c.common.SynchronizeTagsS2CPacket",
+      "resource": "update_tags",
+      "identifier": "minecraft:update_tags"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 14,
+      "name": "Clientbound Known Packs",
+      "packetType": "ConfigPackets.SELECT_KNOWN_PACKS_S2C",
+      "class": "net.minecraft.network.packet.s2c.config.SelectKnownPacksS2CPacket",
+      "resource": "select_known_packs",
+      "identifier": "minecraft:select_known_packs"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 15,
+      "name": "Custom Report Details (configuration)",
+      "packetType": "CommonPackets.CUSTOM_REPORT_DETAILS",
+      "class": "net.minecraft.network.packet.s2c.common.CustomReportDetailsS2CPacket",
+      "resource": "custom_report_details",
+      "identifier": "minecraft:custom_report_details"
+    },
+    {
+      "state": "configuration",
+      "direction": "clientbound",
+      "id": 16,
+      "name": "Server Links (configuration)",
+      "packetType": "CommonPackets.SERVER_LINKS",
+      "class": "net.minecraft.network.packet.s2c.common.ServerLinksS2CPacket",
+      "resource": "server_links",
+      "identifier": "minecraft:server_links"
+    },
+    {
+      "state": "configuration",
+      "direction": "serverbound",
+      "id": 0,
+      "name": "Client Information (configuration)",
+      "packetType": "CommonPackets.CLIENT_INFORMATION",
+      "class": "net.minecraft.network.packet.c2s.common.ClientOptionsC2SPacket",
+      "resource": "client_information",
+      "identifier": "minecraft:client_information"
+    },
+    {
+      "state": "configuration",
+      "direction": "serverbound",
+      "id": 1,
+      "name": "Cookie Response (configuration)",
+      "packetType": "CookiePackets.COOKIE_RESPONSE",
+      "class": "net.minecraft.network.packet.c2s.common.CookieResponseC2SPacket",
+      "resource": "cookie_response",
+      "identifier": "minecraft:cookie_response"
+    },
+    {
+      "state": "configuration",
+      "direction": "serverbound",
+      "id": 2,
+      "name": "Serverbound Plugin Message (configuration)",
+      "packetType": "CommonPackets.CUSTOM_PAYLOAD_C2S",
+      "class": "net.minecraft.network.packet.c2s.common.CustomPayloadC2SPacket",
+      "resource": "custom_payload",
+      "identifier": "minecraft:custom_payload"
+    },
+    {
+      "state": "configuration",
+      "direction": "serverbound",
+      "id": 3,
+      "name": "Acknowledge Finish Configuration",
+      "packetType": "ConfigPackets.FINISH_CONFIGURATION_C2S",
+      "class": "net.minecraft.network.packet.c2s.config.ReadyC2SPacket",
+      "resource": "finish_configuration",
+      "identifier": "minecraft:finish_configuration"
+    },
+    {
+      "state": "configuration",
+      "direction": "serverbound",
+      "id": 4,
+      "name": "Serverbound Keep Alive (configuration)",
+      "packetType": "CommonPackets.KEEP_ALIVE_C2S",
+      "class": "net.minecraft.network.packet.c2s.common.KeepAliveC2SPacket",
+      "resource": "keep_alive",
+      "identifier": "minecraft:keep_alive"
+    },
+    {
+      "state": "configuration",
+      "direction": "serverbound",
+      "id": 5,
+      "name": "Pong (configuration)",
+      "packetType": "CommonPackets.PONG",
+      "class": "net.minecraft.network.packet.c2s.common.CommonPongC2SPacket",
+      "resource": "pong",
+      "identifier": "minecraft:pong"
+    },
+    {
+      "state": "configuration",
+      "direction": "serverbound",
+      "id": 6,
+      "name": "Resource Pack Response (configuration)",
+      "packetType": "CommonPackets.RESOURCE_PACK",
+      "class": "net.minecraft.network.packet.c2s.common.ResourcePackStatusC2SPacket",
+      "resource": "resource_pack",
+      "identifier": "minecraft:resource_pack"
+    },
+    {
+      "state": "configuration",
+      "direction": "serverbound",
+      "id": 7,
+      "name": "Serverbound Known Packs",
+      "packetType": "ConfigPackets.SELECT_KNOWN_PACKS_C2S",
+      "class": "net.minecraft.network.packet.c2s.config.SelectKnownPacksC2SPacket",
+      "resource": "select_known_packs",
+      "identifier": "minecraft:select_known_packs"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 0,
+      "name": "Bundle Delimiter",
+      "packetType": "PlayPackets.BUNDLE_DELIMITER",
+      "class": "net.minecraft.network.packet.s2c.play.BundleDelimiterS2CPacket",
+      "resource": "bundle_delimiter",
+      "wireEvidenceRequired": true,
+      "identifier": "minecraft:bundle_delimiter"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 1,
+      "name": "Spawn Entity",
+      "packetType": "PlayPackets.ADD_ENTITY",
+      "class": "net.minecraft.network.packet.s2c.play.EntitySpawnS2CPacket",
+      "resource": "add_entity",
+      "identifier": "minecraft:add_entity"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 2,
+      "name": "Spawn Experience Orb",
+      "packetType": "PlayPackets.ADD_EXPERIENCE_ORB",
+      "class": "net.minecraft.network.packet.s2c.play.ExperienceOrbSpawnS2CPacket",
+      "resource": "add_experience_orb",
+      "identifier": "minecraft:add_experience_orb"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 3,
+      "name": "Entity Animation",
+      "packetType": "PlayPackets.ANIMATE",
+      "class": "net.minecraft.network.packet.s2c.play.EntityAnimationS2CPacket",
+      "resource": "animate",
+      "identifier": "minecraft:animate"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 4,
+      "name": "Award Statistics",
+      "packetType": "PlayPackets.AWARD_STATS",
+      "class": "net.minecraft.network.packet.s2c.play.StatisticsS2CPacket",
+      "resource": "award_stats",
+      "identifier": "minecraft:award_stats"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 5,
+      "name": "Acknowledge Block Change",
+      "packetType": "PlayPackets.BLOCK_CHANGED_ACK",
+      "class": "net.minecraft.network.packet.s2c.play.PlayerActionResponseS2CPacket",
+      "resource": "block_changed_ack",
+      "identifier": "minecraft:block_changed_ack"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 6,
+      "name": "Set Block Destroy Stage",
+      "packetType": "PlayPackets.BLOCK_DESTRUCTION",
+      "class": "net.minecraft.network.packet.s2c.play.BlockBreakingProgressS2CPacket",
+      "resource": "block_destruction",
+      "identifier": "minecraft:block_destruction"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 7,
+      "name": "Block Entity Data",
+      "packetType": "PlayPackets.BLOCK_ENTITY_DATA",
+      "class": "net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket",
+      "resource": "block_entity_data",
+      "identifier": "minecraft:block_entity_data"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 8,
+      "name": "Block Action",
+      "packetType": "PlayPackets.BLOCK_EVENT",
+      "class": "net.minecraft.network.packet.s2c.play.BlockEventS2CPacket",
+      "resource": "block_event",
+      "identifier": "minecraft:block_event"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 9,
+      "name": "Block Update",
+      "packetType": "PlayPackets.BLOCK_UPDATE",
+      "class": "net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket",
+      "resource": "block_update",
+      "identifier": "minecraft:block_update"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 10,
+      "name": "Boss Bar",
+      "packetType": "PlayPackets.BOSS_EVENT",
+      "class": "net.minecraft.network.packet.s2c.play.BossBarS2CPacket",
+      "resource": "boss_event",
+      "identifier": "minecraft:boss_event"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 11,
+      "name": "Change Difficulty",
+      "packetType": "PlayPackets.CHANGE_DIFFICULTY_S2C",
+      "class": "net.minecraft.network.packet.s2c.play.DifficultyS2CPacket",
+      "resource": "change_difficulty",
+      "identifier": "minecraft:change_difficulty"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 12,
+      "name": "Chunk Batch Finished",
+      "packetType": "PlayPackets.CHUNK_BATCH_FINISHED",
+      "class": "net.minecraft.network.packet.s2c.play.ChunkSentS2CPacket",
+      "resource": "chunk_batch_finished",
+      "identifier": "minecraft:chunk_batch_finished"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 13,
+      "name": "Chunk Batch Start",
+      "packetType": "PlayPackets.CHUNK_BATCH_START",
+      "class": "net.minecraft.network.packet.s2c.play.StartChunkSendS2CPacket",
+      "resource": "chunk_batch_start",
+      "identifier": "minecraft:chunk_batch_start"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 14,
+      "name": "Chunk Biomes",
+      "packetType": "PlayPackets.CHUNKS_BIOMES",
+      "class": "net.minecraft.network.packet.s2c.play.ChunkBiomeDataS2CPacket",
+      "resource": "chunks_biomes",
+      "identifier": "minecraft:chunks_biomes"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 15,
+      "name": "Clear Titles",
+      "packetType": "PlayPackets.CLEAR_TITLES",
+      "class": "net.minecraft.network.packet.s2c.play.ClearTitleS2CPacket",
+      "resource": "clear_titles",
+      "identifier": "minecraft:clear_titles"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 16,
+      "name": "Command Suggestions Response",
+      "packetType": "PlayPackets.COMMAND_SUGGESTIONS",
+      "class": "net.minecraft.network.packet.s2c.play.CommandSuggestionsS2CPacket",
+      "resource": "command_suggestions",
+      "identifier": "minecraft:command_suggestions"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 17,
+      "name": "Commands",
+      "packetType": "PlayPackets.COMMANDS",
+      "class": "net.minecraft.network.packet.s2c.play.CommandTreeS2CPacket",
+      "resource": "commands",
+      "identifier": "minecraft:commands"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 18,
+      "name": "Close Container",
+      "packetType": "PlayPackets.CONTAINER_CLOSE_S2C",
+      "class": "net.minecraft.network.packet.s2c.play.CloseScreenS2CPacket",
+      "resource": "container_close",
+      "identifier": "minecraft:container_close"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 19,
+      "name": "Set Container Content",
+      "packetType": "PlayPackets.CONTAINER_SET_CONTENT",
+      "class": "net.minecraft.network.packet.s2c.play.InventoryS2CPacket",
+      "resource": "container_set_content",
+      "identifier": "minecraft:container_set_content"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 20,
+      "name": "Set Container Property",
+      "packetType": "PlayPackets.CONTAINER_SET_DATA",
+      "class": "net.minecraft.network.packet.s2c.play.ScreenHandlerPropertyUpdateS2CPacket",
+      "resource": "container_set_data",
+      "identifier": "minecraft:container_set_data"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 21,
+      "name": "Set Container Slot",
+      "packetType": "PlayPackets.CONTAINER_SET_SLOT",
+      "class": "net.minecraft.network.packet.s2c.play.ScreenHandlerSlotUpdateS2CPacket",
+      "resource": "container_set_slot",
+      "identifier": "minecraft:container_set_slot"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 22,
+      "name": "Cookie Request (play)",
+      "packetType": "CookiePackets.COOKIE_REQUEST",
+      "class": "net.minecraft.network.packet.s2c.common.CookieRequestS2CPacket",
+      "resource": "cookie_request",
+      "identifier": "minecraft:cookie_request"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 23,
+      "name": "Set Cooldown",
+      "packetType": "PlayPackets.COOLDOWN",
+      "class": "net.minecraft.network.packet.s2c.play.CooldownUpdateS2CPacket",
+      "resource": "cooldown",
+      "identifier": "minecraft:cooldown"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 24,
+      "name": "Chat Suggestions",
+      "packetType": "PlayPackets.CUSTOM_CHAT_COMPLETIONS",
+      "class": "net.minecraft.network.packet.s2c.play.ChatSuggestionsS2CPacket",
+      "resource": "custom_chat_completions",
+      "identifier": "minecraft:custom_chat_completions"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 25,
+      "name": "Clientbound Plugin Message (play)",
+      "packetType": "CommonPackets.CUSTOM_PAYLOAD_S2C",
+      "class": "net.minecraft.network.packet.s2c.common.CustomPayloadS2CPacket",
+      "resource": "custom_payload",
+      "identifier": "minecraft:custom_payload"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 26,
+      "name": "Damage Event",
+      "packetType": "PlayPackets.DAMAGE_EVENT",
+      "class": "net.minecraft.network.packet.s2c.play.EntityDamageS2CPacket",
+      "resource": "damage_event",
+      "identifier": "minecraft:damage_event"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 27,
+      "name": "Debug Sample",
+      "packetType": "PlayPackets.DEBUG_SAMPLE",
+      "class": "net.minecraft.network.packet.s2c.play.DebugSampleS2CPacket",
+      "resource": "debug_sample",
+      "identifier": "minecraft:debug_sample"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 28,
+      "name": "Delete Message",
+      "packetType": "PlayPackets.DELETE_CHAT",
+      "class": "net.minecraft.network.packet.s2c.play.RemoveMessageS2CPacket",
+      "resource": "delete_chat",
+      "identifier": "minecraft:delete_chat"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 29,
+      "name": "Disconnect (play)",
+      "packetType": "CommonPackets.DISCONNECT",
+      "class": "net.minecraft.network.packet.s2c.common.DisconnectS2CPacket",
+      "resource": "disconnect",
+      "identifier": "minecraft:disconnect"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 30,
+      "name": "Disguised Chat Message",
+      "packetType": "PlayPackets.DISGUISED_CHAT",
+      "class": "net.minecraft.network.packet.s2c.play.ProfilelessChatMessageS2CPacket",
+      "resource": "disguised_chat",
+      "identifier": "minecraft:disguised_chat"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 31,
+      "name": "Entity Event",
+      "packetType": "PlayPackets.ENTITY_EVENT",
+      "class": "net.minecraft.network.packet.s2c.play.EntityStatusS2CPacket",
+      "resource": "entity_event",
+      "identifier": "minecraft:entity_event"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 32,
+      "name": "Explosion",
+      "packetType": "PlayPackets.EXPLODE",
+      "class": "net.minecraft.network.packet.s2c.play.ExplosionS2CPacket",
+      "resource": "explode",
+      "identifier": "minecraft:explode"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 33,
+      "name": "Unload Chunk",
+      "packetType": "PlayPackets.FORGET_LEVEL_CHUNK",
+      "class": "net.minecraft.network.packet.s2c.play.UnloadChunkS2CPacket",
+      "resource": "forget_level_chunk",
+      "identifier": "minecraft:forget_level_chunk"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 34,
+      "name": "Game Event",
+      "packetType": "PlayPackets.GAME_EVENT",
+      "class": "net.minecraft.network.packet.s2c.play.GameStateChangeS2CPacket",
+      "resource": "game_event",
+      "identifier": "minecraft:game_event"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 35,
+      "name": "Open Horse Screen",
+      "packetType": "PlayPackets.HORSE_SCREEN_OPEN",
+      "class": "net.minecraft.network.packet.s2c.play.OpenHorseScreenS2CPacket",
+      "resource": "horse_screen_open",
+      "identifier": "minecraft:horse_screen_open"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 36,
+      "name": "Hurt Animation",
+      "packetType": "PlayPackets.HURT_ANIMATION",
+      "class": "net.minecraft.network.packet.s2c.play.DamageTiltS2CPacket",
+      "resource": "hurt_animation",
+      "identifier": "minecraft:hurt_animation"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 37,
+      "name": "Initialize World Border",
+      "packetType": "PlayPackets.INITIALIZE_BORDER",
+      "class": "net.minecraft.network.packet.s2c.play.WorldBorderInitializeS2CPacket",
+      "resource": "initialize_border",
+      "identifier": "minecraft:initialize_border"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 38,
+      "name": "Clientbound Keep Alive (play)",
+      "packetType": "CommonPackets.KEEP_ALIVE_S2C",
+      "class": "net.minecraft.network.packet.s2c.common.KeepAliveS2CPacket",
+      "resource": "keep_alive",
+      "identifier": "minecraft:keep_alive"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 39,
+      "name": "Chunk Data and Update Light",
+      "packetType": "PlayPackets.LEVEL_CHUNK_WITH_LIGHT",
+      "class": "net.minecraft.network.packet.s2c.play.ChunkDataS2CPacket",
+      "resource": "level_chunk_with_light",
+      "identifier": "minecraft:level_chunk_with_light"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 40,
+      "name": "World Event",
+      "packetType": "PlayPackets.LEVEL_EVENT",
+      "class": "net.minecraft.network.packet.s2c.play.WorldEventS2CPacket",
+      "resource": "level_event",
+      "identifier": "minecraft:level_event"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 41,
+      "name": "Particle",
+      "packetType": "PlayPackets.LEVEL_PARTICLES",
+      "class": "net.minecraft.network.packet.s2c.play.ParticleS2CPacket",
+      "resource": "level_particles",
+      "identifier": "minecraft:level_particles"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 42,
+      "name": "Update Light",
+      "packetType": "PlayPackets.LIGHT_UPDATE",
+      "class": "net.minecraft.network.packet.s2c.play.LightUpdateS2CPacket",
+      "resource": "light_update",
+      "identifier": "minecraft:light_update"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 43,
+      "name": "Login (play)",
+      "packetType": "PlayPackets.LOGIN",
+      "class": "net.minecraft.network.packet.s2c.play.GameJoinS2CPacket",
+      "resource": "login",
+      "identifier": "minecraft:login"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 44,
+      "name": "Map Data",
+      "packetType": "PlayPackets.MAP_ITEM_DATA",
+      "class": "net.minecraft.network.packet.s2c.play.MapUpdateS2CPacket",
+      "resource": "map_item_data",
+      "identifier": "minecraft:map_item_data"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 45,
+      "name": "Merchant Offers",
+      "packetType": "PlayPackets.MERCHANT_OFFERS",
+      "class": "net.minecraft.network.packet.s2c.play.SetTradeOffersS2CPacket",
+      "resource": "merchant_offers",
+      "identifier": "minecraft:merchant_offers"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 46,
+      "name": "Update Entity Position",
+      "packetType": "PlayPackets.MOVE_ENTITY_POS",
+      "class": "net.minecraft.network.packet.s2c.play.EntityS2CPacket$MoveRelative",
+      "resource": "move_entity_pos",
+      "identifier": "minecraft:move_entity_pos"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 47,
+      "name": "Update Entity Position and Rotation",
+      "packetType": "PlayPackets.MOVE_ENTITY_POS_ROT",
+      "class": "net.minecraft.network.packet.s2c.play.EntityS2CPacket$RotateAndMoveRelative",
+      "resource": "move_entity_pos_rot",
+      "identifier": "minecraft:move_entity_pos_rot"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 48,
+      "name": "Update Entity Rotation",
+      "packetType": "PlayPackets.MOVE_ENTITY_ROT",
+      "class": "net.minecraft.network.packet.s2c.play.EntityS2CPacket$Rotate",
+      "resource": "move_entity_rot",
+      "identifier": "minecraft:move_entity_rot"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 49,
+      "name": "Move Vehicle",
+      "packetType": "PlayPackets.MOVE_VEHICLE_S2C",
+      "class": "net.minecraft.network.packet.s2c.play.VehicleMoveS2CPacket",
+      "resource": "move_vehicle",
+      "identifier": "minecraft:move_vehicle"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 50,
+      "name": "Open Book",
+      "packetType": "PlayPackets.OPEN_BOOK",
+      "class": "net.minecraft.network.packet.s2c.play.OpenWrittenBookS2CPacket",
+      "resource": "open_book",
+      "identifier": "minecraft:open_book"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 51,
+      "name": "Open Screen",
+      "packetType": "PlayPackets.OPEN_SCREEN",
+      "class": "net.minecraft.network.packet.s2c.play.OpenScreenS2CPacket",
+      "resource": "open_screen",
+      "identifier": "minecraft:open_screen"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 52,
+      "name": "Open Sign Editor",
+      "packetType": "PlayPackets.OPEN_SIGN_EDITOR",
+      "class": "net.minecraft.network.packet.s2c.play.SignEditorOpenS2CPacket",
+      "resource": "open_sign_editor",
+      "identifier": "minecraft:open_sign_editor"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 53,
+      "name": "Ping (play)",
+      "packetType": "CommonPackets.PING",
+      "class": "net.minecraft.network.packet.s2c.common.CommonPingS2CPacket",
+      "resource": "ping",
+      "identifier": "minecraft:ping"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 54,
+      "name": "Ping Response (play)",
+      "packetType": "PingPackets.PONG_RESPONSE",
+      "class": "net.minecraft.network.packet.s2c.query.PingResultS2CPacket",
+      "resource": "pong_response",
+      "identifier": "minecraft:pong_response"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 55,
+      "name": "Place Ghost Recipe",
+      "packetType": "PlayPackets.PLACE_GHOST_RECIPE",
+      "class": "net.minecraft.network.packet.s2c.play.CraftFailedResponseS2CPacket",
+      "resource": "place_ghost_recipe",
+      "identifier": "minecraft:place_ghost_recipe"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 56,
+      "name": "Player Abilities (clientbound)",
+      "packetType": "PlayPackets.PLAYER_ABILITIES_S2C",
+      "class": "net.minecraft.network.packet.s2c.play.PlayerAbilitiesS2CPacket",
+      "resource": "player_abilities",
+      "identifier": "minecraft:player_abilities"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 57,
+      "name": "Player Chat Message",
+      "packetType": "PlayPackets.PLAYER_CHAT",
+      "class": "net.minecraft.network.packet.s2c.play.ChatMessageS2CPacket",
+      "resource": "player_chat",
+      "identifier": "minecraft:player_chat"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 58,
+      "name": "End Combat",
+      "packetType": "PlayPackets.PLAYER_COMBAT_END",
+      "class": "net.minecraft.network.packet.s2c.play.EndCombatS2CPacket",
+      "resource": "player_combat_end",
+      "identifier": "minecraft:player_combat_end"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 59,
+      "name": "Enter Combat",
+      "packetType": "PlayPackets.PLAYER_COMBAT_ENTER",
+      "class": "net.minecraft.network.packet.s2c.play.EnterCombatS2CPacket",
+      "resource": "player_combat_enter",
+      "identifier": "minecraft:player_combat_enter"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 60,
+      "name": "Combat Death",
+      "packetType": "PlayPackets.PLAYER_COMBAT_KILL",
+      "class": "net.minecraft.network.packet.s2c.play.DeathMessageS2CPacket",
+      "resource": "player_combat_kill",
+      "identifier": "minecraft:player_combat_kill"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 61,
+      "name": "Player Info Remove",
+      "packetType": "PlayPackets.PLAYER_INFO_REMOVE",
+      "class": "net.minecraft.network.packet.s2c.play.PlayerRemoveS2CPacket",
+      "resource": "player_info_remove",
+      "identifier": "minecraft:player_info_remove"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 62,
+      "name": "Player Info Update",
+      "packetType": "PlayPackets.PLAYER_INFO_UPDATE",
+      "class": "net.minecraft.network.packet.s2c.play.PlayerListS2CPacket",
+      "resource": "player_info_update",
+      "identifier": "minecraft:player_info_update"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 63,
+      "name": "Look At",
+      "packetType": "PlayPackets.PLAYER_LOOK_AT",
+      "class": "net.minecraft.network.packet.s2c.play.LookAtS2CPacket",
+      "resource": "player_look_at",
+      "identifier": "minecraft:player_look_at"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 64,
+      "name": "Synchronize Player Position",
+      "packetType": "PlayPackets.PLAYER_POSITION",
+      "class": "net.minecraft.network.packet.s2c.play.PlayerPositionLookS2CPacket",
+      "resource": "player_position",
+      "identifier": "minecraft:player_position"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 65,
+      "name": "Update Recipe Book",
+      "packetType": "PlayPackets.RECIPE",
+      "class": "net.minecraft.network.packet.s2c.play.ChangeUnlockedRecipesS2CPacket",
+      "resource": "recipe",
+      "identifier": "minecraft:recipe"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 66,
+      "name": "Remove Entities",
+      "packetType": "PlayPackets.REMOVE_ENTITIES",
+      "class": "net.minecraft.network.packet.s2c.play.EntitiesDestroyS2CPacket",
+      "resource": "remove_entities",
+      "identifier": "minecraft:remove_entities"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 67,
+      "name": "Remove Entity Effect",
+      "packetType": "PlayPackets.REMOVE_MOB_EFFECT",
+      "class": "net.minecraft.network.packet.s2c.play.RemoveEntityStatusEffectS2CPacket",
+      "resource": "remove_mob_effect",
+      "identifier": "minecraft:remove_mob_effect"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 68,
+      "name": "Reset Score",
+      "packetType": "PlayPackets.RESET_SCORE",
+      "class": "net.minecraft.network.packet.s2c.play.ScoreboardScoreResetS2CPacket",
+      "resource": "reset_score",
+      "identifier": "minecraft:reset_score"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 69,
+      "name": "Remove Resource Pack (play)",
+      "packetType": "CommonPackets.RESOURCE_PACK_POP",
+      "class": "net.minecraft.network.packet.s2c.common.ResourcePackRemoveS2CPacket",
+      "resource": "resource_pack_pop",
+      "identifier": "minecraft:resource_pack_pop"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 70,
+      "name": "Add Resource Pack (play)",
+      "packetType": "CommonPackets.RESOURCE_PACK_PUSH",
+      "class": "net.minecraft.network.packet.s2c.common.ResourcePackSendS2CPacket",
+      "resource": "resource_pack_push",
+      "identifier": "minecraft:resource_pack_push"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 71,
+      "name": "Respawn",
+      "packetType": "PlayPackets.RESPAWN",
+      "class": "net.minecraft.network.packet.s2c.play.PlayerRespawnS2CPacket",
+      "resource": "respawn",
+      "identifier": "minecraft:respawn"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 72,
+      "name": "Set Head Rotation",
+      "packetType": "PlayPackets.ROTATE_HEAD",
+      "class": "net.minecraft.network.packet.s2c.play.EntitySetHeadYawS2CPacket",
+      "resource": "rotate_head",
+      "identifier": "minecraft:rotate_head"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 73,
+      "name": "Update Section Blocks",
+      "packetType": "PlayPackets.SECTION_BLOCKS_UPDATE",
+      "class": "net.minecraft.network.packet.s2c.play.ChunkDeltaUpdateS2CPacket",
+      "resource": "section_blocks_update",
+      "identifier": "minecraft:section_blocks_update"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 74,
+      "name": "Select Advancements Tab",
+      "packetType": "PlayPackets.SELECT_ADVANCEMENTS_TAB",
+      "class": "net.minecraft.network.packet.s2c.play.SelectAdvancementTabS2CPacket",
+      "resource": "select_advancements_tab",
+      "identifier": "minecraft:select_advancements_tab"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 75,
+      "name": "Server Data",
+      "packetType": "PlayPackets.SERVER_DATA",
+      "class": "net.minecraft.network.packet.s2c.play.ServerMetadataS2CPacket",
+      "resource": "server_data",
+      "identifier": "minecraft:server_data"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 76,
+      "name": "Set Action Bar Text",
+      "packetType": "PlayPackets.SET_ACTION_BAR_TEXT",
+      "class": "net.minecraft.network.packet.s2c.play.OverlayMessageS2CPacket",
+      "resource": "set_action_bar_text",
+      "identifier": "minecraft:set_action_bar_text"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 77,
+      "name": "Set Border Center",
+      "packetType": "PlayPackets.SET_BORDER_CENTER",
+      "class": "net.minecraft.network.packet.s2c.play.WorldBorderCenterChangedS2CPacket",
+      "resource": "set_border_center",
+      "identifier": "minecraft:set_border_center"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 78,
+      "name": "Set Border Lerp Size",
+      "packetType": "PlayPackets.SET_BORDER_LERP_SIZE",
+      "class": "net.minecraft.network.packet.s2c.play.WorldBorderInterpolateSizeS2CPacket",
+      "resource": "set_border_lerp_size",
+      "identifier": "minecraft:set_border_lerp_size"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 79,
+      "name": "Set Border Size",
+      "packetType": "PlayPackets.SET_BORDER_SIZE",
+      "class": "net.minecraft.network.packet.s2c.play.WorldBorderSizeChangedS2CPacket",
+      "resource": "set_border_size",
+      "identifier": "minecraft:set_border_size"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 80,
+      "name": "Set Border Warning Delay",
+      "packetType": "PlayPackets.SET_BORDER_WARNING_DELAY",
+      "class": "net.minecraft.network.packet.s2c.play.WorldBorderWarningTimeChangedS2CPacket",
+      "resource": "set_border_warning_delay",
+      "identifier": "minecraft:set_border_warning_delay"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 81,
+      "name": "Set Border Warning Distance",
+      "packetType": "PlayPackets.SET_BORDER_WARNING_DISTANCE",
+      "class": "net.minecraft.network.packet.s2c.play.WorldBorderWarningBlocksChangedS2CPacket",
+      "resource": "set_border_warning_distance",
+      "identifier": "minecraft:set_border_warning_distance"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 82,
+      "name": "Set Camera",
+      "packetType": "PlayPackets.SET_CAMERA",
+      "class": "net.minecraft.network.packet.s2c.play.SetCameraEntityS2CPacket",
+      "resource": "set_camera",
+      "identifier": "minecraft:set_camera"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 83,
+      "name": "Set Held Item (clientbound)",
+      "packetType": "PlayPackets.SET_CARRIED_ITEM_S2C",
+      "class": "net.minecraft.network.packet.s2c.play.UpdateSelectedSlotS2CPacket",
+      "resource": "set_carried_item",
+      "identifier": "minecraft:set_carried_item"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 84,
+      "name": "Set Center Chunk",
+      "packetType": "PlayPackets.SET_CHUNK_CACHE_CENTER",
+      "class": "net.minecraft.network.packet.s2c.play.ChunkRenderDistanceCenterS2CPacket",
+      "resource": "set_chunk_cache_center",
+      "identifier": "minecraft:set_chunk_cache_center"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 85,
+      "name": "Set Render Distance",
+      "packetType": "PlayPackets.SET_CHUNK_CACHE_RADIUS",
+      "class": "net.minecraft.network.packet.s2c.play.ChunkLoadDistanceS2CPacket",
+      "resource": "set_chunk_cache_radius",
+      "identifier": "minecraft:set_chunk_cache_radius"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 86,
+      "name": "Set Default Spawn Position",
+      "packetType": "PlayPackets.SET_DEFAULT_SPAWN_POSITION",
+      "class": "net.minecraft.network.packet.s2c.play.PlayerSpawnPositionS2CPacket",
+      "resource": "set_default_spawn_position",
+      "identifier": "minecraft:set_default_spawn_position"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 87,
+      "name": "Display Objective",
+      "packetType": "PlayPackets.SET_DISPLAY_OBJECTIVE",
+      "class": "net.minecraft.network.packet.s2c.play.ScoreboardDisplayS2CPacket",
+      "resource": "set_display_objective",
+      "identifier": "minecraft:set_display_objective"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 88,
+      "name": "Set Entity Metadata",
+      "packetType": "PlayPackets.SET_ENTITY_DATA",
+      "class": "net.minecraft.network.packet.s2c.play.EntityTrackerUpdateS2CPacket",
+      "resource": "set_entity_data",
+      "identifier": "minecraft:set_entity_data"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 89,
+      "name": "Link Entities",
+      "packetType": "PlayPackets.SET_ENTITY_LINK",
+      "class": "net.minecraft.network.packet.s2c.play.EntityAttachS2CPacket",
+      "resource": "set_entity_link",
+      "identifier": "minecraft:set_entity_link"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 90,
+      "name": "Set Entity Velocity",
+      "packetType": "PlayPackets.SET_ENTITY_MOTION",
+      "class": "net.minecraft.network.packet.s2c.play.EntityVelocityUpdateS2CPacket",
+      "resource": "set_entity_motion",
+      "identifier": "minecraft:set_entity_motion"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 91,
+      "name": "Set Equipment",
+      "packetType": "PlayPackets.SET_EQUIPMENT",
+      "class": "net.minecraft.network.packet.s2c.play.EntityEquipmentUpdateS2CPacket",
+      "resource": "set_equipment",
+      "identifier": "minecraft:set_equipment"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 92,
+      "name": "Set Experience",
+      "packetType": "PlayPackets.SET_EXPERIENCE",
+      "class": "net.minecraft.network.packet.s2c.play.ExperienceBarUpdateS2CPacket",
+      "resource": "set_experience",
+      "identifier": "minecraft:set_experience"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 93,
+      "name": "Set Health",
+      "packetType": "PlayPackets.SET_HEALTH",
+      "class": "net.minecraft.network.packet.s2c.play.HealthUpdateS2CPacket",
+      "resource": "set_health",
+      "identifier": "minecraft:set_health"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 94,
+      "name": "Update Objectives",
+      "packetType": "PlayPackets.SET_OBJECTIVE",
+      "class": "net.minecraft.network.packet.s2c.play.ScoreboardObjectiveUpdateS2CPacket",
+      "resource": "set_objective",
+      "identifier": "minecraft:set_objective"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 95,
+      "name": "Set Passengers",
+      "packetType": "PlayPackets.SET_PASSENGERS",
+      "class": "net.minecraft.network.packet.s2c.play.EntityPassengersSetS2CPacket",
+      "resource": "set_passengers",
+      "identifier": "minecraft:set_passengers"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 96,
+      "name": "Update Teams",
+      "packetType": "PlayPackets.SET_PLAYER_TEAM",
+      "class": "net.minecraft.network.packet.s2c.play.TeamS2CPacket",
+      "resource": "set_player_team",
+      "identifier": "minecraft:set_player_team"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 97,
+      "name": "Update Score",
+      "packetType": "PlayPackets.SET_SCORE",
+      "class": "net.minecraft.network.packet.s2c.play.ScoreboardScoreUpdateS2CPacket",
+      "resource": "set_score",
+      "identifier": "minecraft:set_score"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 98,
+      "name": "Set Simulation Distance",
+      "packetType": "PlayPackets.SET_SIMULATION_DISTANCE",
+      "class": "net.minecraft.network.packet.s2c.play.SimulationDistanceS2CPacket",
+      "resource": "set_simulation_distance",
+      "identifier": "minecraft:set_simulation_distance"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 99,
+      "name": "Set Subtitle Text",
+      "packetType": "PlayPackets.SET_SUBTITLE_TEXT",
+      "class": "net.minecraft.network.packet.s2c.play.SubtitleS2CPacket",
+      "resource": "set_subtitle_text",
+      "identifier": "minecraft:set_subtitle_text"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 100,
+      "name": "Update Time",
+      "packetType": "PlayPackets.SET_TIME",
+      "class": "net.minecraft.network.packet.s2c.play.WorldTimeUpdateS2CPacket",
+      "resource": "set_time",
+      "identifier": "minecraft:set_time"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 101,
+      "name": "Set Title Text",
+      "packetType": "PlayPackets.SET_TITLE_TEXT",
+      "class": "net.minecraft.network.packet.s2c.play.TitleS2CPacket",
+      "resource": "set_title_text",
+      "identifier": "minecraft:set_title_text"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 102,
+      "name": "Set Title Animation Times",
+      "packetType": "PlayPackets.SET_TITLES_ANIMATION",
+      "class": "net.minecraft.network.packet.s2c.play.TitleFadeS2CPacket",
+      "resource": "set_titles_animation",
+      "identifier": "minecraft:set_titles_animation"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 103,
+      "name": "Entity Sound Effect",
+      "packetType": "PlayPackets.SOUND_ENTITY",
+      "class": "net.minecraft.network.packet.s2c.play.PlaySoundFromEntityS2CPacket",
+      "resource": "sound_entity",
+      "identifier": "minecraft:sound_entity"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 104,
+      "name": "Sound Effect",
+      "packetType": "PlayPackets.SOUND",
+      "class": "net.minecraft.network.packet.s2c.play.PlaySoundS2CPacket",
+      "resource": "sound",
+      "identifier": "minecraft:sound"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 105,
+      "name": "Start Configuration",
+      "packetType": "PlayPackets.START_CONFIGURATION",
+      "class": "net.minecraft.network.packet.s2c.play.EnterReconfigurationS2CPacket",
+      "resource": "start_configuration",
+      "identifier": "minecraft:start_configuration"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 106,
+      "name": "Stop Sound",
+      "packetType": "PlayPackets.STOP_SOUND",
+      "class": "net.minecraft.network.packet.s2c.play.StopSoundS2CPacket",
+      "resource": "stop_sound",
+      "identifier": "minecraft:stop_sound"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 107,
+      "name": "Store Cookie (play)",
+      "packetType": "CommonPackets.STORE_COOKIE",
+      "class": "net.minecraft.network.packet.s2c.common.StoreCookieS2CPacket",
+      "resource": "store_cookie",
+      "identifier": "minecraft:store_cookie"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 108,
+      "name": "System Chat Message",
+      "packetType": "PlayPackets.SYSTEM_CHAT",
+      "class": "net.minecraft.network.packet.s2c.play.GameMessageS2CPacket",
+      "resource": "system_chat",
+      "identifier": "minecraft:system_chat"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 109,
+      "name": "Set Tab List Header And Footer",
+      "packetType": "PlayPackets.TAB_LIST",
+      "class": "net.minecraft.network.packet.s2c.play.PlayerListHeaderS2CPacket",
+      "resource": "tab_list",
+      "identifier": "minecraft:tab_list"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 110,
+      "name": "Tag Query Response",
+      "packetType": "PlayPackets.TAG_QUERY",
+      "class": "net.minecraft.network.packet.s2c.play.NbtQueryResponseS2CPacket",
+      "resource": "tag_query",
+      "identifier": "minecraft:tag_query"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 111,
+      "name": "Pickup Item",
+      "packetType": "PlayPackets.TAKE_ITEM_ENTITY",
+      "class": "net.minecraft.network.packet.s2c.play.ItemPickupAnimationS2CPacket",
+      "resource": "take_item_entity",
+      "identifier": "minecraft:take_item_entity"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 112,
+      "name": "Teleport Entity",
+      "packetType": "PlayPackets.TELEPORT_ENTITY",
+      "class": "net.minecraft.network.packet.s2c.play.EntityPositionS2CPacket",
+      "resource": "teleport_entity",
+      "identifier": "minecraft:teleport_entity"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 113,
+      "name": "Set Ticking State",
+      "packetType": "PlayPackets.TICKING_STATE",
+      "class": "net.minecraft.network.packet.s2c.play.UpdateTickRateS2CPacket",
+      "resource": "ticking_state",
+      "identifier": "minecraft:ticking_state"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 114,
+      "name": "Step Tick",
+      "packetType": "PlayPackets.TICKING_STEP",
+      "class": "net.minecraft.network.packet.s2c.play.TickStepS2CPacket",
+      "resource": "ticking_step",
+      "identifier": "minecraft:ticking_step"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 115,
+      "name": "Transfer (play)",
+      "packetType": "CommonPackets.TRANSFER",
+      "class": "net.minecraft.network.packet.s2c.common.ServerTransferS2CPacket",
+      "resource": "transfer",
+      "identifier": "minecraft:transfer"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 116,
+      "name": "Update Advancements",
+      "packetType": "PlayPackets.UPDATE_ADVANCEMENTS",
+      "class": "net.minecraft.network.packet.s2c.play.AdvancementUpdateS2CPacket",
+      "resource": "update_advancements",
+      "identifier": "minecraft:update_advancements"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 117,
+      "name": "Update Attributes",
+      "packetType": "PlayPackets.UPDATE_ATTRIBUTES",
+      "class": "net.minecraft.network.packet.s2c.play.EntityAttributesS2CPacket",
+      "resource": "update_attributes",
+      "identifier": "minecraft:update_attributes"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 118,
+      "name": "Entity Effect",
+      "packetType": "PlayPackets.UPDATE_MOB_EFFECT",
+      "class": "net.minecraft.network.packet.s2c.play.EntityStatusEffectS2CPacket",
+      "resource": "update_mob_effect",
+      "identifier": "minecraft:update_mob_effect"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 119,
+      "name": "Update Recipes",
+      "packetType": "PlayPackets.UPDATE_RECIPES",
+      "class": "net.minecraft.network.packet.s2c.play.SynchronizeRecipesS2CPacket",
+      "resource": "update_recipes",
+      "identifier": "minecraft:update_recipes"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 120,
+      "name": "Update Tags (play)",
+      "packetType": "CommonPackets.UPDATE_TAGS",
+      "class": "net.minecraft.network.packet.s2c.common.SynchronizeTagsS2CPacket",
+      "resource": "update_tags",
+      "identifier": "minecraft:update_tags"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 121,
+      "name": "Projectile Power",
+      "packetType": "PlayPackets.PROJECTILE_POWER",
+      "class": "net.minecraft.network.packet.s2c.play.ProjectilePowerS2CPacket",
+      "resource": "projectile_power",
+      "identifier": "minecraft:projectile_power"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 122,
+      "name": "Custom Report Details",
+      "packetType": "CommonPackets.CUSTOM_REPORT_DETAILS",
+      "class": "net.minecraft.network.packet.s2c.common.CustomReportDetailsS2CPacket",
+      "resource": "custom_report_details",
+      "identifier": "minecraft:custom_report_details"
+    },
+    {
+      "state": "play",
+      "direction": "clientbound",
+      "id": 123,
+      "name": "Server Links",
+      "packetType": "CommonPackets.SERVER_LINKS",
+      "class": "net.minecraft.network.packet.s2c.common.ServerLinksS2CPacket",
+      "resource": "server_links",
+      "identifier": "minecraft:server_links"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 0,
+      "name": "Confirm Teleportation",
+      "packetType": "PlayPackets.ACCEPT_TELEPORTATION",
+      "class": "net.minecraft.network.packet.c2s.play.TeleportConfirmC2SPacket",
+      "resource": "accept_teleportation",
+      "identifier": "minecraft:accept_teleportation"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 1,
+      "name": "Query Block Entity Tag",
+      "packetType": "PlayPackets.BLOCK_ENTITY_TAG_QUERY",
+      "class": "net.minecraft.network.packet.c2s.play.QueryBlockNbtC2SPacket",
+      "identifier": "minecraft:block_entity_tag_query"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 2,
+      "name": "Change Difficulty",
+      "packetType": "PlayPackets.CHANGE_DIFFICULTY_C2S",
+      "class": "net.minecraft.network.packet.c2s.play.UpdateDifficultyC2SPacket",
+      "identifier": "minecraft:change_difficulty"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 3,
+      "name": "Acknowledge Message",
+      "packetType": "PlayPackets.CHAT_ACK",
+      "class": "net.minecraft.network.packet.c2s.play.MessageAcknowledgmentC2SPacket",
+      "identifier": "minecraft:chat_ack"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 4,
+      "name": "Chat Command",
+      "packetType": "PlayPackets.CHAT_COMMAND",
+      "class": "net.minecraft.network.packet.c2s.play.CommandExecutionC2SPacket",
+      "identifier": "minecraft:chat_command"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 5,
+      "name": "Signed Chat Command",
+      "packetType": "PlayPackets.CHAT_COMMAND_SIGNED",
+      "class": "net.minecraft.network.packet.c2s.play.ChatCommandSignedC2SPacket",
+      "identifier": "minecraft:chat_command_signed"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 6,
+      "name": "Chat Message",
+      "packetType": "PlayPackets.CHAT",
+      "class": "net.minecraft.network.packet.c2s.play.ChatMessageC2SPacket",
+      "resource": "chat",
+      "identifier": "minecraft:chat"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 7,
+      "name": "Player Session",
+      "packetType": "PlayPackets.CHAT_SESSION_UPDATE",
+      "class": "net.minecraft.network.packet.c2s.play.PlayerSessionC2SPacket",
+      "identifier": "minecraft:chat_session_update"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 8,
+      "name": "Chunk Batch Received",
+      "packetType": "PlayPackets.CHUNK_BATCH_RECEIVED",
+      "class": "net.minecraft.network.packet.c2s.play.AcknowledgeChunksC2SPacket",
+      "resource": "chunk_batch_received",
+      "identifier": "minecraft:chunk_batch_received"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 9,
+      "name": "Client Status",
+      "packetType": "PlayPackets.CLIENT_COMMAND",
+      "class": "net.minecraft.network.packet.c2s.play.ClientStatusC2SPacket",
+      "resource": "client_command",
+      "identifier": "minecraft:client_command"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 10,
+      "name": "Client Information (play)",
+      "packetType": "CommonPackets.CLIENT_INFORMATION",
+      "class": "net.minecraft.network.packet.c2s.common.ClientOptionsC2SPacket",
+      "identifier": "minecraft:client_information"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 11,
+      "name": "Command Suggestions Request",
+      "packetType": "PlayPackets.COMMAND_SUGGESTION",
+      "class": "net.minecraft.network.packet.c2s.play.RequestCommandCompletionsC2SPacket",
+      "identifier": "minecraft:command_suggestion"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 12,
+      "name": "Acknowledge Configuration",
+      "packetType": "PlayPackets.CONFIGURATION_ACKNOWLEDGED",
+      "class": "net.minecraft.network.packet.c2s.play.AcknowledgeReconfigurationC2SPacket",
+      "identifier": "minecraft:configuration_acknowledged"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 13,
+      "name": "Click Container Button",
+      "packetType": "PlayPackets.CONTAINER_BUTTON_CLICK",
+      "class": "net.minecraft.network.packet.c2s.play.ButtonClickC2SPacket",
+      "identifier": "minecraft:container_button_click"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 14,
+      "name": "Click Container",
+      "packetType": "PlayPackets.CONTAINER_CLICK",
+      "class": "net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket",
+      "identifier": "minecraft:container_click"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 15,
+      "name": "Close Container",
+      "packetType": "PlayPackets.CONTAINER_CLOSE_C2S",
+      "class": "net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket",
+      "identifier": "minecraft:container_close"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 16,
+      "name": "Change Container Slot State",
+      "packetType": "PlayPackets.CONTAINER_SLOT_STATE_CHANGED",
+      "class": "net.minecraft.network.packet.c2s.play.SlotChangedStateC2SPacket",
+      "identifier": "minecraft:container_slot_state_changed"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 17,
+      "name": "Cookie Response (play)",
+      "packetType": "CookiePackets.COOKIE_RESPONSE",
+      "class": "net.minecraft.network.packet.c2s.common.CookieResponseC2SPacket",
+      "identifier": "minecraft:cookie_response"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 18,
+      "name": "Serverbound Plugin Message (play)",
+      "packetType": "CommonPackets.CUSTOM_PAYLOAD_C2S",
+      "class": "net.minecraft.network.packet.c2s.common.CustomPayloadC2SPacket",
+      "identifier": "minecraft:custom_payload"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 19,
+      "name": "Debug Sample Subscription",
+      "packetType": "PlayPackets.DEBUG_SAMPLE_SUBSCRIPTION",
+      "class": "net.minecraft.network.packet.c2s.play.DebugSampleSubscriptionC2SPacket",
+      "identifier": "minecraft:debug_sample_subscription"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 20,
+      "name": "Edit Book",
+      "packetType": "PlayPackets.EDIT_BOOK",
+      "class": "net.minecraft.network.packet.c2s.play.BookUpdateC2SPacket",
+      "identifier": "minecraft:edit_book"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 21,
+      "name": "Query Entity Tag",
+      "packetType": "PlayPackets.ENTITY_TAG_QUERY",
+      "class": "net.minecraft.network.packet.c2s.play.QueryEntityNbtC2SPacket",
+      "identifier": "minecraft:entity_tag_query"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 22,
+      "name": "Interact",
+      "packetType": "PlayPackets.INTERACT",
+      "class": "net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket",
+      "identifier": "minecraft:interact"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 23,
+      "name": "Jigsaw Generate",
+      "packetType": "PlayPackets.JIGSAW_GENERATE",
+      "class": "net.minecraft.network.packet.c2s.play.JigsawGeneratingC2SPacket",
+      "identifier": "minecraft:jigsaw_generate"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 24,
+      "name": "Serverbound Keep Alive (play)",
+      "packetType": "CommonPackets.KEEP_ALIVE_C2S",
+      "class": "net.minecraft.network.packet.c2s.common.KeepAliveC2SPacket",
+      "resource": "keep_alive",
+      "identifier": "minecraft:keep_alive"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 25,
+      "name": "Lock Difficulty",
+      "packetType": "PlayPackets.LOCK_DIFFICULTY",
+      "class": "net.minecraft.network.packet.c2s.play.UpdateDifficultyLockC2SPacket",
+      "identifier": "minecraft:lock_difficulty"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 26,
+      "name": "Set Player Position",
+      "packetType": "PlayPackets.MOVE_PLAYER_POS",
+      "class": "net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket$PositionAndOnGround",
+      "identifier": "minecraft:move_player_pos"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 27,
+      "name": "Set Player Position and Rotation",
+      "packetType": "PlayPackets.MOVE_PLAYER_POS_ROT",
+      "class": "net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket$Full",
+      "identifier": "minecraft:move_player_pos_rot"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 28,
+      "name": "Set Player Rotation",
+      "packetType": "PlayPackets.MOVE_PLAYER_ROT",
+      "class": "net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket$LookAndOnGround",
+      "identifier": "minecraft:move_player_rot"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 29,
+      "name": "Set Player On Ground",
+      "packetType": "PlayPackets.MOVE_PLAYER_STATUS_ONLY",
+      "class": "net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket$OnGroundOnly",
+      "identifier": "minecraft:move_player_status_only"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 30,
+      "name": "Move Vehicle",
+      "packetType": "PlayPackets.MOVE_VEHICLE_C2S",
+      "class": "net.minecraft.network.packet.c2s.play.VehicleMoveC2SPacket",
+      "identifier": "minecraft:move_vehicle"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 31,
+      "name": "Paddle Boat",
+      "packetType": "PlayPackets.PADDLE_BOAT",
+      "class": "net.minecraft.network.packet.c2s.play.BoatPaddleStateC2SPacket",
+      "identifier": "minecraft:paddle_boat"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 32,
+      "name": "Pick Item",
+      "packetType": "PlayPackets.PICK_ITEM",
+      "class": "net.minecraft.network.packet.c2s.play.PickFromInventoryC2SPacket",
+      "identifier": "minecraft:pick_item"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 33,
+      "name": "Ping Request (play)",
+      "packetType": "PingPackets.PING_REQUEST",
+      "class": "net.minecraft.network.packet.c2s.query.QueryPingC2SPacket",
+      "identifier": "minecraft:ping_request"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 34,
+      "name": "Place Recipe",
+      "packetType": "PlayPackets.PLACE_RECIPE",
+      "class": "net.minecraft.network.packet.c2s.play.CraftRequestC2SPacket",
+      "identifier": "minecraft:place_recipe"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 35,
+      "name": "Player Abilities (serverbound)",
+      "packetType": "PlayPackets.PLAYER_ABILITIES_C2S",
+      "class": "net.minecraft.network.packet.c2s.play.UpdatePlayerAbilitiesC2SPacket",
+      "identifier": "minecraft:player_abilities"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 36,
+      "name": "Player Action",
+      "packetType": "PlayPackets.PLAYER_ACTION",
+      "class": "net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket",
+      "identifier": "minecraft:player_action"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 37,
+      "name": "Player Command",
+      "packetType": "PlayPackets.PLAYER_COMMAND",
+      "class": "net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket",
+      "identifier": "minecraft:player_command"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 38,
+      "name": "Player Input",
+      "packetType": "PlayPackets.PLAYER_INPUT",
+      "class": "net.minecraft.network.packet.c2s.play.PlayerInputC2SPacket",
+      "identifier": "minecraft:player_input"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 39,
+      "name": "Pong (play)",
+      "packetType": "CommonPackets.PONG",
+      "class": "net.minecraft.network.packet.c2s.common.CommonPongC2SPacket",
+      "identifier": "minecraft:pong"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 40,
+      "name": "Change Recipe Book Settings",
+      "packetType": "PlayPackets.RECIPE_BOOK_CHANGE_SETTINGS",
+      "class": "net.minecraft.network.packet.c2s.play.RecipeCategoryOptionsC2SPacket",
+      "identifier": "minecraft:recipe_book_change_settings"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 41,
+      "name": "Set Seen Recipe",
+      "packetType": "PlayPackets.RECIPE_BOOK_SEEN_RECIPE",
+      "class": "net.minecraft.network.packet.c2s.play.RecipeBookDataC2SPacket",
+      "identifier": "minecraft:recipe_book_seen_recipe"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 42,
+      "name": "Rename Item",
+      "packetType": "PlayPackets.RENAME_ITEM",
+      "class": "net.minecraft.network.packet.c2s.play.RenameItemC2SPacket",
+      "identifier": "minecraft:rename_item"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 43,
+      "name": "Resource Pack Response (play)",
+      "packetType": "CommonPackets.RESOURCE_PACK",
+      "class": "net.minecraft.network.packet.c2s.common.ResourcePackStatusC2SPacket",
+      "identifier": "minecraft:resource_pack"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 44,
+      "name": "Seen Advancements",
+      "packetType": "PlayPackets.SEEN_ADVANCEMENTS",
+      "class": "net.minecraft.network.packet.c2s.play.AdvancementTabC2SPacket",
+      "identifier": "minecraft:seen_advancements"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 45,
+      "name": "Select Trade",
+      "packetType": "PlayPackets.SELECT_TRADE",
+      "class": "net.minecraft.network.packet.c2s.play.SelectMerchantTradeC2SPacket",
+      "identifier": "minecraft:select_trade"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 46,
+      "name": "Set Beacon Effect",
+      "packetType": "PlayPackets.SET_BEACON",
+      "class": "net.minecraft.network.packet.c2s.play.UpdateBeaconC2SPacket",
+      "identifier": "minecraft:set_beacon"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 47,
+      "name": "Set Held Item (serverbound)",
+      "packetType": "PlayPackets.SET_CARRIED_ITEM_C2S",
+      "class": "net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket",
+      "identifier": "minecraft:set_carried_item"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 48,
+      "name": "Program Command Block",
+      "packetType": "PlayPackets.SET_COMMAND_BLOCK",
+      "class": "net.minecraft.network.packet.c2s.play.UpdateCommandBlockC2SPacket",
+      "identifier": "minecraft:set_command_block"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 49,
+      "name": "Program Command Block Minecart",
+      "packetType": "PlayPackets.SET_COMMAND_MINECART",
+      "class": "net.minecraft.network.packet.c2s.play.UpdateCommandBlockMinecartC2SPacket",
+      "identifier": "minecraft:set_command_minecart"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 50,
+      "name": "Set Creative Mode Slot",
+      "packetType": "PlayPackets.SET_CREATIVE_MODE_SLOT",
+      "class": "net.minecraft.network.packet.c2s.play.CreativeInventoryActionC2SPacket",
+      "identifier": "minecraft:set_creative_mode_slot"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 51,
+      "name": "Program Jigsaw Block",
+      "packetType": "PlayPackets.SET_JIGSAW_BLOCK",
+      "class": "net.minecraft.network.packet.c2s.play.UpdateJigsawC2SPacket",
+      "identifier": "minecraft:set_jigsaw_block"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 52,
+      "name": "Program Structure Block",
+      "packetType": "PlayPackets.SET_STRUCTURE_BLOCK",
+      "class": "net.minecraft.network.packet.c2s.play.UpdateStructureBlockC2SPacket",
+      "identifier": "minecraft:set_structure_block"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 53,
+      "name": "Update Sign",
+      "packetType": "PlayPackets.SIGN_UPDATE",
+      "class": "net.minecraft.network.packet.c2s.play.UpdateSignC2SPacket",
+      "identifier": "minecraft:sign_update"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 54,
+      "name": "Swing Arm",
+      "packetType": "PlayPackets.SWING",
+      "class": "net.minecraft.network.packet.c2s.play.HandSwingC2SPacket",
+      "identifier": "minecraft:swing"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 55,
+      "name": "Teleport To Entity",
+      "packetType": "PlayPackets.TELEPORT_TO_ENTITY",
+      "class": "net.minecraft.network.packet.c2s.play.SpectatorTeleportC2SPacket",
+      "identifier": "minecraft:teleport_to_entity"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 56,
+      "name": "Use Item On",
+      "packetType": "PlayPackets.USE_ITEM_ON",
+      "class": "net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket",
+      "identifier": "minecraft:use_item_on"
+    },
+    {
+      "state": "play",
+      "direction": "serverbound",
+      "id": 57,
+      "name": "Use Item",
+      "packetType": "PlayPackets.USE_ITEM",
+      "class": "net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket",
+      "identifier": "minecraft:use_item"
+    }
+  ]
+}

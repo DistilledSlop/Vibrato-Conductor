@@ -1,0 +1,187 @@
+{
+  "schemaVersion": 1,
+  "minecraftVersion": "1.21.1",
+  "tasks": [
+    {
+      "id": "director",
+      "command": "director",
+      "seconds": 300,
+      "targets": [],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Seeded autonomous activities"
+    },
+    {
+      "id": "nether",
+      "command": "@nether",
+      "seconds": 3600,
+      "targets": [],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Enter the Nether; authoritative dimension outcome required"
+    },
+    {
+      "id": "gamer",
+      "command": "@gamer",
+      "seconds": 14400,
+      "targets": [],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Beat the game; authoritative task outcome required"
+    },
+    {
+      "id": "get-oak_log",
+      "command": "@get oak_log 1",
+      "seconds": 300,
+      "targets": [
+        "item:minecraft:oak_log"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one oak_log through the existing item task catalogue"
+    },
+    {
+      "id": "get-spruce_log",
+      "command": "@get spruce_log 1",
+      "seconds": 300,
+      "targets": [
+        "item:minecraft:spruce_log"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one spruce_log through the existing item task catalogue"
+    },
+    {
+      "id": "get-birch_log",
+      "command": "@get birch_log 1",
+      "seconds": 300,
+      "targets": [
+        "item:minecraft:birch_log"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one birch_log through the existing item task catalogue"
+    },
+    {
+      "id": "get-dirt",
+      "command": "@get dirt 1",
+      "seconds": 180,
+      "targets": [
+        "item:minecraft:dirt"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one dirt through the existing item task catalogue"
+    },
+    {
+      "id": "get-sand",
+      "command": "@get sand 1",
+      "seconds": 300,
+      "targets": [
+        "item:minecraft:sand"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one sand through the existing item task catalogue"
+    },
+    {
+      "id": "get-cobblestone",
+      "command": "@get cobblestone 1",
+      "seconds": 300,
+      "targets": [
+        "item:minecraft:cobblestone"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one cobblestone through the existing item task catalogue"
+    },
+    {
+      "id": "get-coal",
+      "command": "@get coal 1",
+      "seconds": 600,
+      "targets": [
+        "item:minecraft:coal"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one coal through the existing item task catalogue"
+    },
+    {
+      "id": "get-iron_ingot",
+      "command": "@get iron_ingot 1",
+      "seconds": 900,
+      "targets": [
+        "item:minecraft:iron_ingot"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one iron_ingot through the existing item task catalogue"
+    },
+    {
+      "id": "get-crafting_table",
+      "command": "@get crafting_table 1",
+      "seconds": 360,
+      "targets": [
+        "item:minecraft:crafting_table"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one crafting_table through the existing item task catalogue"
+    },
+    {
+      "id": "get-wooden_pick",
+      "command": "@get wooden_pick 1",
+      "seconds": 480,
+      "targets": [
+        "item:minecraft:wooden_pickaxe"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one wooden_pickaxe through the existing item task catalogue"
+    },
+    {
+      "id": "get-furnace",
+      "command": "@get furnace 1",
+      "seconds": 480,
+      "targets": [
+        "item:minecraft:furnace"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one furnace through the existing item task catalogue"
+    },
+    {
+      "id": "get-torch",
+      "command": "@get torch 1",
+      "seconds": 600,
+      "targets": [
+        "item:minecraft:torch"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain one torch through the existing item task catalogue"
+    },
+    {
+      "id": "observe-mobs",
+      "command": "director",
+      "seconds": 600,
+      "targets": [],
+      "supported": true,
+      "requiresTags": [
+        "mobs"
+      ],
+      "description": "Autonomous activities in a bank world surveyed for mob observations"
+    },
+    {
+      "id": "protocol-fixture-suite",
+      "command": "@protocol suite",
+      "seconds": 1800,
+      "targets": [],
+      "supported": false,
+      "requiresTags": [
+        "protocol-fixture"
+      ],
+      "unsupportedReason": "Requires a separately validated fixture server/mod image; ordinary workers do not contain it"
+    }
+  ]
+}
