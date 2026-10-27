@@ -295,10 +295,14 @@ class Fleet:
             if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 18: return False
         return not health.get('classification')
 
-    def _verify_result(self, row):
-        roots = [self.config.artifacts_dir / row['run_id']]
+    def _artifact_roots(self, run_id):
+        roots = [self.config.artifacts_dir / run_id]
         if self.config.central_dir is not None:
-            roots.append(self.config.central_dir / row['run_id'])
+            roots.append(self.config.central_dir / run_id)
+        return roots
+
+    def _verify_result(self, row):
+        roots = self._artifact_roots(row['run_id'])
         # Terminal evidence may already have been safely delivered and pruned from the spool.
         # Live telemetry continues to read only the worker's spool, never stale central files.
         for root in roots:
@@ -382,12 +386,19 @@ class Fleet:
                     if result is not None:
                         with self.db:
                             self.db.execute('UPDATE workers SET finalized=1,result=? WHERE run_id=?', (json.dumps(result), run_id))
-                if self.scheduler and not row['ingested'] and (self.config.artifacts_dir / run_id / 'manifest.json').exists():
-                    try:
-                        self.scheduler.ingest(self.config.artifacts_dir / run_id)
-                        with self.db: self.db.execute('UPDATE workers SET ingested=1 WHERE run_id=?', (run_id,))
-                    except Exception as error:
-                        with self.db: self._event('coverage_error', str(error), run_id)
+                if self.scheduler and not row['ingested']:
+                    errors = []
+                    for root in self._artifact_roots(run_id):
+                        if not (root / 'manifest.json').is_file(): continue
+                        try:
+                            self.scheduler.ingest(root)
+                            with self.db: self.db.execute('UPDATE workers SET ingested=1 WHERE run_id=?', (run_id,))
+                            break
+                        except Exception as error: errors.append(str(error))
+                    else:
+                        if errors:
+                            with self.db: self._event('coverage_error', '; '.join(errors), run_id)
+
                 continue
             if value is None:
                 if row['state'] == 'pending':

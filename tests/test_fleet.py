@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from conductor.fleet import Fleet, FleetConfig
 from conductor.storage import atomic_json, artifact_manifest
@@ -227,6 +228,10 @@ class FleetTests(unittest.TestCase):
         self.assertTrue(result['workers'][0]['artifactsVerified'])
         self.assertEqual(self.runtime.removes, [run_id])
         self.assertTrue((self.fleet.config.central_dir / run_id / 'manifest.json').is_file())
+        ingested = []
+        self.fleet.scheduler = SimpleNamespace(ingest=lambda path: ingested.append(path), snapshot=lambda: {})
+        self.fleet.reconcile()
+        self.assertEqual(ingested, [self.fleet.config.central_dir / run_id])
 
     def test_second_process_cannot_reconcile_while_lease_held(self):
         other = Fleet(self.config, self.runtime, clock=self.clock)
