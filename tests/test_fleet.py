@@ -243,6 +243,15 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(result['pausedReason'], 'another_reconciler_active')
         self.assertEqual(self.runtime.creates, [])
 
+    def test_scheduler_cannot_silently_grant_invalid_operator_permissions(self):
+        self.fleet.scheduler = SimpleNamespace(
+            choose=lambda *a, **k: {'task': 'director', 'seed': 1, 'seconds': 30, 'operator': 'false'},
+            snapshot=lambda: {})
+        self.fleet.set_target(1)
+        with self.assertRaisesRegex(ValueError, 'operator must be boolean'): self.fleet.reconcile()
+        self.assertEqual(self.runtime.creates, [])
+        self.assertEqual(self.fleet.snapshot()['workers'], [])
+
     def test_configuration_rejects_unsafe_identity_and_bad_limits(self):
         for data in ({'fleet_id': '../bad'}, {'cpus': float('nan')}, {'desired': 2, 'max_workers': 1},
                      {'accept_eula': 'false'}, {'world_ids': ['../bad'], 'world_bank': '/bank'}):

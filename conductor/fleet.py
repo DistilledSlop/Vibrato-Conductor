@@ -13,7 +13,7 @@ import uuid
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
-from .backends import BackendError, DockerBackend, KubernetesBackend
+from .backends import BackendError, DockerBackend, KubernetesBackend, worker_env
 from .storage import verify_manifest
 
 ACTIVE = {'pending', 'created', 'starting', 'running', 'unhealthy', 'stopping'}
@@ -336,6 +336,8 @@ class Fleet:
         spec.setdefault('seed', self.config.seed)
         spec.setdefault('seconds', self.config.seconds)
         spec.setdefault('worldId', None)
+        spec.setdefault('gamemode', 'survival')
+        spec.setdefault('operator', False)
         self.db.execute('INSERT OR IGNORE INTO workers(run_id,backend_id,state,spec,created,updated) VALUES (?,?,?,?,?,?)',
                         (run_id, value['backendId'], 'pending' if value['state'] in ('completed', 'failed') else value['state'], json.dumps(spec), now, now))
         self._event('adopted', 'Recovered an owned worker from the runtime', run_id)
@@ -353,6 +355,9 @@ class Fleet:
         spec.setdefault('seconds', self.config.seconds)
         spec.setdefault('seed', self.config.seed)
         spec.setdefault('task', self.config.task)
+        spec.setdefault('gamemode', 'survival')
+        spec.setdefault('operator', False)
+        worker_env(self.config, spec)  # validate permissions before persisting or creating anything
         return spec
 
     def reconcile(self):
@@ -537,6 +542,8 @@ class Fleet:
                 result = json.loads(row['result']) if row['result'] else None
                 workers.append({'runId': row['run_id'], 'backendId': row['backend_id'], 'state': row['state'],
                                 'task': spec['task'], 'worldId': spec.get('worldId'), 'seed': spec['seed'],
+                                'gamemode': spec.get('gamemode', 'survival'), 'operator': spec.get('operator', False),
+                                'scenario': spec.get('scenario'),
                                 'assignment': spec, 'createdWall': row['created'], 'updatedWall': row['updated'],
                                 'reason': row['reason'], 'health': health, 'healthy': self._healthy(health, row['state']), 'result': result,
                                 'artifacts': str(self.config.artifacts_dir / row['run_id']),
