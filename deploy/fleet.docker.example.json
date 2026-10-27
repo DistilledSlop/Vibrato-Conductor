@@ -19,5 +19,16 @@
   "seconds": 300,
   "mode": "diagnostic",
   "accept_eula": false,
-  "accept_offline": false
+  "accept_offline": false,
+  "central_dir": ".state/dataset",
+  "max_buffer_bytes": 2147483648,
+  "enabled_tasks": [
+    "director",
+    "get-dirt"
+  ],
+  "delivery_retry_seconds": 15,
+  "spool_success_days": 3,
+  "spool_failure_days": 14,
+  "central_diagnostic_days": 30,
+  "central_failure_days": 90
 }

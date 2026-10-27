@@ -85,3 +85,30 @@ spec:
   resources:
     requests:
       storage: 50Gi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: vibrato-test-dataset
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes: [ReadWriteMany]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: vibrato-test
+  hostPath:
+    path: /conductor-state/dataset
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vibrato-dataset
+  namespace: vibrato
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: vibrato-test
+  volumeName: vibrato-test-dataset
+  resources:
+    requests:
+      storage: 100Gi

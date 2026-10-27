@@ -52,6 +52,14 @@ data:
       "state_dir": "/data/fleet",
       "workspace_dir": "/data/workspaces",
       "artifacts_dir": "/artifacts",
+      "central_dir": "/dataset",
+      "max_buffer_bytes": 2147483648,
+      "enabled_tasks": ["director", "get-dirt"],
+      "delivery_retry_seconds": 15,
+      "spool_success_days": 3,
+      "spool_failure_days": 14,
+      "central_diagnostic_days": 30,
+      "central_failure_days": 90,
       "artifacts_pvc": "vibrato-artifacts",
       "image": "vibrato-worker:dev",
       "desired": 0,
@@ -144,6 +152,8 @@ spec:
               mountPath: /data
             - name: artifacts
               mountPath: /artifacts
+            - name: dataset
+              mountPath: /dataset
             - name: config
               mountPath: /config
               readOnly: true
@@ -159,6 +169,9 @@ spec:
         - name: artifacts
           persistentVolumeClaim:
             claimName: vibrato-artifacts
+        - name: dataset
+          persistentVolumeClaim:
+            claimName: vibrato-dataset
         - name: config
           configMap:
             name: vibrato-controller-config
