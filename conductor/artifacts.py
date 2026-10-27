@@ -119,13 +119,16 @@ class ArtifactStore:
             with db: yield db
         finally: db.close()
 
-    def quarantine_orphan(self, run_id: str, reason: str, *, terminal: bool = False, metadata: dict | None = None) -> dict:
+    def quarantine_orphan(self, run_id: str, reason: str, *, terminal: bool = False, metadata: dict | None = None,
+                          confidence: str = 'confirmed', classification: str | None = None) -> dict:
         """Finalize evidence after a confirmed terminal runtime death, never while a worker may still write.
 
         The caller must establish backend terminal/absent state. This records infrastructure loss, not inferred bot
         failure. Original malformed/incomplete files remain available as forensic artifacts.
         """
         if not terminal: raise ValueError('Orphan quarantine requires confirmed terminal runtime state')
+        if confidence not in ('confirmed', 'inferred'): raise ValueError('Invalid quarantine confidence')
+        classification = classification or ('confirmed_runtime_termination' if confidence == 'confirmed' else 'runtime_missing_after_quiescence')
         if not IDENTIFIER.fullmatch(run_id): raise ValueError('Invalid run id')
         root = self.local_root / run_id
         if not root.is_dir() or root.is_symlink(): raise ValueError('No safe orphan artifact directory')
@@ -153,7 +156,7 @@ class ArtifactStore:
                 result_path.replace(backup)
             result = {'schemaVersion': 1, 'runId': run_id, 'reason': str(reason), 'diagnosticPassed': False,
                       'taskSuccess': None, 'datasetEligible': False, 'quarantined': True,
-                      'classification': 'confirmed_runtime_termination',
+                      'classification': classification, 'confidence': confidence,
                       'capture': {'complete': False, 'bytes': sum(p.stat().st_size for p in (root / 'captures').glob('*.bin') if not p.is_symlink())},
                       'serverHealth': {'valid': False, 'samples': 0, 'meanTps': None},
                       'qualityInvalid': ['runtime_terminated_before_finalization'], 'finalizedWall': time.time()}

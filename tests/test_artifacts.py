@@ -275,3 +275,16 @@ class IndependentTickGateTests(unittest.TestCase):
                 report = quality_report(run)
                 self.assertFalse(report['eligible'])
                 self.assertIn(reason, report['reasons'])
+
+
+class QuarantineConfidenceTests(unittest.TestCase):
+    def test_quiescent_absent_runtime_does_not_claim_confirmed_process_death(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            store = ArtifactStore(root / 'local', root / 'central', root / 'state')
+            (root / 'local/missing-run').mkdir()
+            result = store.quarantine_orphan('missing-run', 'pod_absent', terminal=True, confidence='inferred',
+                                             classification='runtime_missing_after_quiescence')
+            self.assertEqual(result['confidence'], 'inferred')
+            self.assertEqual(result['classification'], 'runtime_missing_after_quiescence')
+            self.assertFalse(result['datasetEligible'])
