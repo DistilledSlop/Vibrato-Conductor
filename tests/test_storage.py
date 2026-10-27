@@ -41,7 +41,6 @@ class StorageTests(unittest.TestCase):
             self.assertNotEqual(first['files'][0]['sha256'], second['files'][0]['sha256'])
 
 
-if __name__ == '__main__': unittest.main()
 
 
 class IntegrityTests(unittest.TestCase):
@@ -75,3 +74,5 @@ class IntegrityTests(unittest.TestCase):
             (root / 'link').unlink()
             atomic_json(root / 'manifest.json', {'schemaVersion': 1, 'result': {}, 'files': [{'path': '../outside', 'bytes': 0, 'sha256': ''}]})
             with self.assertRaisesRegex(ValueError, 'Unsafe'): verify_manifest(root)
+
+if __name__ == '__main__': unittest.main()

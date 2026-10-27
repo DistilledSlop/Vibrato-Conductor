@@ -9,7 +9,10 @@
       "targets": [],
       "supported": true,
       "requiresTags": [],
-      "description": "Seeded autonomous activities"
+      "description": "Seeded autonomous activities",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "nether",
@@ -18,7 +21,10 @@
       "targets": [],
       "supported": true,
       "requiresTags": [],
-      "description": "Enter the Nether; authoritative dimension outcome required"
+      "description": "Enter the Nether; authoritative dimension outcome required",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "gamer",
@@ -27,7 +33,10 @@
       "targets": [],
       "supported": true,
       "requiresTags": [],
-      "description": "Beat the game; authoritative task outcome required"
+      "description": "Beat the game; authoritative task outcome required",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-oak_log",
@@ -38,7 +47,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one oak_log through the existing item task catalogue"
+      "description": "Obtain one oak_log through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-spruce_log",
@@ -49,7 +61,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one spruce_log through the existing item task catalogue"
+      "description": "Obtain one spruce_log through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-birch_log",
@@ -60,7 +75,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one birch_log through the existing item task catalogue"
+      "description": "Obtain one birch_log through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-dirt",
@@ -71,7 +89,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one dirt through the existing item task catalogue"
+      "description": "Obtain one dirt through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-sand",
@@ -82,7 +103,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one sand through the existing item task catalogue"
+      "description": "Obtain one sand through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-cobblestone",
@@ -93,7 +117,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one cobblestone through the existing item task catalogue"
+      "description": "Obtain one cobblestone through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-coal",
@@ -104,7 +131,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one coal through the existing item task catalogue"
+      "description": "Obtain one coal through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-iron_ingot",
@@ -115,7 +145,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one iron_ingot through the existing item task catalogue"
+      "description": "Obtain one iron_ingot through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-crafting_table",
@@ -126,7 +159,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one crafting_table through the existing item task catalogue"
+      "description": "Obtain one crafting_table through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-wooden_pick",
@@ -137,7 +173,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one wooden_pickaxe through the existing item task catalogue"
+      "description": "Obtain one wooden_pickaxe through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-furnace",
@@ -148,7 +187,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one furnace through the existing item task catalogue"
+      "description": "Obtain one furnace through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "get-torch",
@@ -159,7 +201,10 @@
       ],
       "supported": true,
       "requiresTags": [],
-      "description": "Obtain one torch through the existing item task catalogue"
+      "description": "Obtain one torch through the existing item task catalogue",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "observe-mobs",
@@ -170,7 +215,10 @@
       "requiresTags": [
         "mobs"
       ],
-      "description": "Autonomous activities in a bank world surveyed for mob observations"
+      "description": "Autonomous activities in a bank world surveyed for mob observations",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     },
     {
       "id": "protocol-fixture-suite",
@@ -181,7 +229,90 @@
       "requiresTags": [
         "protocol-fixture"
       ],
-      "unsupportedReason": "Requires a separately validated fixture server/mod image; ordinary workers do not contain it"
+      "unsupportedReason": "Requires a separately validated fixture server/mod image; ordinary workers do not contain it",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "creative_inventory",
+      "command": "@conductor_scenario creative_inventory",
+      "seconds": 120,
+      "targets": [
+        "mode:creative",
+        "permission:non_operator"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "gamemode": "creative",
+      "operator": false,
+      "scenario": "creative_inventory",
+      "description": "Verify creative inventory changes against the server observer",
+      "operatorLevel": 2
+    },
+    {
+      "id": "creative_build",
+      "command": "@conductor_scenario creative_build",
+      "seconds": 150,
+      "targets": [
+        "mode:creative",
+        "permission:non_operator"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "gamemode": "creative",
+      "operator": false,
+      "scenario": "creative_build",
+      "description": "Place and break blocks through creative-mode client actions",
+      "operatorLevel": 2
+    },
+    {
+      "id": "adventure_inspect",
+      "command": "@conductor_scenario adventure_inspect",
+      "seconds": 120,
+      "targets": [
+        "mode:adventure",
+        "permission:non_operator"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "gamemode": "adventure",
+      "operator": false,
+      "scenario": "adventure_inspect",
+      "description": "Inspect Adventure restrictions using attempted interactions and server state",
+      "operatorLevel": 2
+    },
+    {
+      "id": "spectator_explore",
+      "command": "@conductor_scenario spectator_explore",
+      "seconds": 120,
+      "targets": [
+        "mode:spectator",
+        "permission:non_operator"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "gamemode": "spectator",
+      "operator": false,
+      "scenario": "spectator_explore",
+      "description": "Explore through spectator movement and verify server-observed movement",
+      "operatorLevel": 2
+    },
+    {
+      "id": "operator_commands",
+      "command": "@conductor_scenario operator_commands",
+      "seconds": 120,
+      "targets": [
+        "mode:survival",
+        "permission:operator"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "gamemode": "survival",
+      "operator": true,
+      "scenario": "operator_commands",
+      "description": "Exercise permission-level-two commands with confirmed server outcomes",
+      "operatorLevel": 2
     }
   ]
 }

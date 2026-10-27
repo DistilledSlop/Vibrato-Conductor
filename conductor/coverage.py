@@ -41,6 +41,15 @@ class CoverageInventory:
             raise ValueError('Invalid task failure cooldown settings')
         self.lock = threading.RLock()
         self.tasks = json.loads((self.catalog_path / 'tasks.json').read_text())['tasks']
+        for task in self.tasks:
+            task.setdefault('gamemode', 'survival')
+            task.setdefault('operator', False)
+            task.setdefault('operatorLevel', 2)
+            if task['gamemode'] not in ('survival', 'creative', 'adventure', 'spectator'):
+                raise ValueError('Invalid task gamemode: ' + str(task['gamemode']))
+            if not isinstance(task['operator'], bool): raise ValueError('Task operator flag must be boolean')
+            if isinstance(task['operatorLevel'], bool) or task['operatorLevel'] not in (1, 2, 3, 4):
+                raise ValueError('Task operatorLevel must be 1..4')
         self.enabled_tasks = set(enabled_tasks) if enabled_tasks is not None else None
         if self.enabled_tasks is not None:
             unknown = self.enabled_tasks - {t['id'] for t in self.tasks}
@@ -91,6 +100,12 @@ class CoverageInventory:
         obtainable = set((self.catalog_path / 'obtainable-items.txt').read_text().splitlines())
         entity_types = {e['name']: e.get('type') for e in registries.get('entities', [])}
         mapped_items = {target for task in self.tasks for target in task.get('targets', [])}
+        action_capabilities = set()
+        for task in self.tasks:
+            if not task.get('supported'): continue
+            if task.get('scenario') == 'creative_inventory': action_capabilities.add('item-inventory-interact:minecraft:stone')
+            if task.get('scenario') == 'creative_build':
+                action_capabilities.update({'item-use:minecraft:stone', 'block-statechange:minecraft:stone'})
         for kind, key, rule in [('item', 'items', 'inventory_present'), ('block', 'blocks', 'crosshair_target'), ('mob', 'mobs', 'loaded_nearby')]:
             for name in registries[key]:
                 supported = kind != 'item' or name in obtainable or 'item:minecraft:' + name in mapped_items
@@ -112,14 +127,49 @@ class CoverageInventory:
                     'mob': [('mob-interact', 'server_confirmed_mob_interaction')],
                 }[kind]
                 for prefix, evidence_rule in facets:
-                    add(prefix + ':minecraft:' + name, kind, name + ' / ' + prefix.split('-', 1)[1], False,
+                    identity = prefix + ':minecraft:' + name
+                    capability = identity in action_capabilities
+                    add(identity, kind, name + ' / ' + prefix.split('-', 1)[1], capability,
                         evidence_rule, {'registryId': 'minecraft:' + name, 'facet': prefix,
-                                        'unsupportedReason': 'Requires authoritative action-specific event instrumentation; presence or inventory delta is insufficient'})
+                                        'gamemodes': ['creative'] if capability else [],
+                                        'unsupportedReason': None if capability else 'Requires authoritative action-specific event instrumentation; presence or inventory delta is insufficient'})
+        for mode in ['survival', 'creative', 'adventure', 'spectator']:
+            add('mode:' + mode, 'mode', mode, True, 'actual_observed_game_mode')
+        for flag in ['creativeMode', 'allowFlying', 'flying', 'invulnerable', 'allowModifyWorld']:
+            for enabled in [False, True]:
+                add('ability:' + flag + ':' + str(enabled).lower(), 'permission', flag + ' = ' + str(enabled).lower(), True,
+                    'actual_observed_player_ability', {'ability': flag, 'enabled': enabled})
+        for operator in [False, True]:
+            add('permission:' + ('operator' if operator else 'non_operator'), 'permission', 'operator' if operator else 'non-operator', True,
+                'server_observed_permission_level', {'operator': operator})
+        for level in range(5):
+            add('permission-level:' + str(level), 'permission', 'permission level ' + str(level), level in (0, 2),
+                'server_observed_permission_level',
+                {'level': level, 'unsupportedReason': None if level in (0, 2) else 'No explicit curriculum scenario configures this permission level'})
+        add('permission:adventure-break-denied', 'permission', 'Adventure block breaking denied', True,
+            'client_break_attempt_and_confirmed_unchanged_server_block')
+        add('permission:spectator-pass-through', 'permission', 'Spectator movement through solid blocks', True,
+            'client_spectator_move_and_server_position_through_unchanged_solid_block')
+        add('permission:operator-command-success', 'permission', 'authorized operator command result', True,
+            'server_confirmed_operator_command_result')
+        add('permission:operator-command-denied', 'permission', 'denied operator command result', False,
+            'server_confirmed_permission_denial', {'unsupportedReason': 'No authoritative denied-command response instrumentation yet'})
         for task in self.tasks:
+            details = {'command': task['command'], 'seconds': task['seconds'], 'gamemode': task['gamemode'],
+                       'operator': task['operator'], 'operatorLevel': task['operatorLevel'], 'scenario': task.get('scenario'),
+                       'requiresTags': task.get('requiresTags', []), 'unsupportedReason': task.get('unsupportedReason')}
             add('task:' + task['id'], 'task', task.get('description', task['id']), task['supported'],
-                'authoritative_root_task_success_not_dispatch_or_elapsed_budget',
-                {'command': task['command'], 'seconds': task['seconds'],
-                 'requiresTags': task.get('requiresTags', []), 'unsupportedReason': task.get('unsupportedReason')})
+                'authoritative_root_task_success_not_dispatch_or_elapsed_budget', details)
+            context = self._context_id(task['id'], task['gamemode'], task['operator'])
+            add(context, 'task', task['id'] + ' / ' + task['gamemode'] + ' / ' + ('operator' if task['operator'] else 'non-operator'),
+                task['supported'], 'observed_task_and_actual_mode_and_server_permission', {**details, 'facet': 'mode-permission-context'})
+            if task.get('scenario'):
+                add('scenario:' + task['scenario'], 'task', task['scenario'] + ' server-confirmed outcome', task['supported'],
+                    'client_actions_plus_confirmed_server_observer', {**details, 'facet': 'scenario-outcome'})
+
+    @staticmethod
+    def _context_id(task_id, gamemode, operator):
+        return 'task-context:' + task_id + ':' + gamemode + ':' + ('operator' if operator else 'non_operator')
 
     def choose(self, run_id: str, worlds=None) -> dict:
         """Persist allocation before backend create; retries of a run id receive the same assignment."""
@@ -150,7 +200,9 @@ class CoverageInventory:
                 for world in available:
                     if not world.get('supported', True) or world.get('minecraftVersion', '1.21.1') != '1.21.1': continue
                     if not set(task.get('requiresTags', [])).issubset(world.get('tags', [])): continue
-                    targets = ['task:' + task['id'], *task.get('targets', [])]
+                    if task['gamemode'] not in world.get('gamemodes', ['survival', 'creative', 'adventure', 'spectator']): continue
+                    if task['operator'] and world.get('allowOperator', True) is not True: continue
+                    targets = ['task:' + task['id'], self._context_id(task['id'], task['gamemode'], task['operator']), *task.get('targets', [])]
                     deficit = sum(1 / (1 + counts.get(t, 0) + 2 * successes.get(t, 0)) for t in targets) / len(targets)
                     score = deficit / ((1 + assigned.get(task['id'], 0)) * (1 + task_health.get('consecutive_failures', 0)))
                     tie = hashlib.sha256(f'{self.seed}:{run_id}:{task["id"]}:{world.get("id")}'.encode()).hexdigest()
@@ -160,7 +212,8 @@ class CoverageInventory:
             value = int.from_bytes(hashlib.sha256(f'{self.seed}:{run_id}'.encode()).digest()[:8], 'big') >> 1
             assignment = {'task': task['command'], 'task_id': task['id'], 'seconds': task['seconds'],
                           'seed': value, 'world_id': world.get('id'), 'target_ids': targets,
-                          'world_revision': world.get('revision'), 'requires_tags': task.get('requiresTags', [])}
+                          'world_revision': world.get('revision'), 'requires_tags': task.get('requiresTags', []),
+                          'gamemode': task['gamemode'], 'operator': task['operator'], 'operatorLevel': task['operatorLevel'], 'scenario': task.get('scenario')}
             db.execute('INSERT INTO assignments VALUES(?,?,?,?)', (run_id, task['id'], json.dumps(assignment), time.time()))
             return assignment
 
@@ -210,6 +263,8 @@ class CoverageInventory:
                 if end != raw_path.stat().st_size or status.get('bytes') != end:
                     raise ValueError('Capture completeness marker disagrees with indexed bytes')
             observed_director = False
+            observed_contexts = set()
+            proven_interactions = set()
             heartbeats = run_dir / 'heartbeats.jsonl'
             if heartbeats.exists():
                 with heartbeats.open() as lines:
@@ -220,6 +275,22 @@ class CoverageInventory:
                         if not isinstance(heartbeat, dict):
                             unknown.add(('artifact', 'invalid_heartbeat_shape')); continue
                         observed_director = observed_director or heartbeat.get('rootClass') == 'DirectorTask'
+                        actual_mode = heartbeat.get('actualMode')
+                        if actual_mode in ('survival', 'creative', 'adventure', 'spectator'):
+                            record('mode:' + actual_mode, 'heartbeat:actual_mode')
+                        abilities = heartbeat.get('abilities') or {}
+                        if isinstance(abilities, dict):
+                            for flag in ['creativeMode', 'allowFlying', 'flying', 'invulnerable', 'allowModifyWorld']:
+                                if isinstance(abilities.get(flag), bool):
+                                    record('ability:' + flag + ':' + str(abilities[flag]).lower(), 'heartbeat:actual_ability')
+                        permission_level = heartbeat.get('permissionLevel')
+                        if (heartbeat.get('permissionSource') == 'server_observer' and isinstance(permission_level, int)
+                                and not isinstance(permission_level, bool) and 0 <= permission_level <= 4):
+                            operator = permission_level >= 2
+                            record('permission:' + ('operator' if operator else 'non_operator'), 'heartbeat:server_permission')
+                            record('permission-level:' + str(permission_level), 'heartbeat:server_permission')
+                            if actual_mode in ('survival', 'creative', 'adventure', 'spectator'):
+                                observed_contexts.add((actual_mode, operator, permission_level))
                         semantics = heartbeat.get('observationSemantics', {})
                         observations = heartbeat.get('observations', {})
                         if not isinstance(semantics, dict) or not isinstance(observations, dict):
@@ -244,13 +315,60 @@ class CoverageInventory:
             task_seen = (command == 'director' and observed_director) or any(
                 c.get('action') == command and c.get('status') in ('dispatched', 'completed')
                 for c in script.get('commands', []))
+            task_definition = next((t for t in self.tasks if t['id'] == task_id), None)
+            actual_context = bool(task_definition and (task_definition['gamemode'], task_definition['operator'],
+                task_definition['operatorLevel'] if task_definition['operator'] else 0) in observed_contexts)
+            scenario_proven = False
             if task_id and task_seen:
                 record('task:' + task_id, 'observed_director_root' if command == 'director' else 'script_command_dispatch')
+                if actual_context:
+                    record(self._context_id(task_id, task_definition['gamemode'], task_definition['operator']),
+                           'observed_task_and_server_mode_permission')
+            scenario_path = run_dir / 'scenario-result.json'
+            if task_definition and task_definition.get('scenario') and scenario_path.exists():
+                try: scenario = json.loads(scenario_path.read_text())
+                except ValueError:
+                    unknown.add(('artifact', 'malformed_scenario_result')); scenario = {}
+                evidence = scenario.get('evidence') or {} if isinstance(scenario, dict) else {}
+                scenario_proven = (isinstance(scenario, dict) and isinstance(evidence, dict) and task_seen and actual_context
+                    and scenario.get('scenario') == task_definition['scenario'] and scenario.get('status') == 'completed'
+                    and scenario.get('source') == 'client_actions_plus_server_observer' and evidence.get('serverConfirmed') is True)
+                if scenario_proven:
+                    record('scenario:' + task_definition['scenario'], 'scenario:client_actions_and_server_confirmation')
+                    if task_definition['scenario'] == 'adventure_inspect':
+                        record('permission:adventure-break-denied', 'scenario:confirmed_adventure_restriction')
+                        proven_interactions.add('permission:adventure-break-denied')
+                    elif task_definition['scenario'] == 'spectator_explore':
+                        record('permission:spectator-pass-through', 'scenario:confirmed_spectator_movement')
+                        proven_interactions.add('permission:spectator-pass-through')
+                    events = evidence.get('events', [])
+                    if isinstance(events, list):
+                        prefixes = {'item_acquire': 'item-acquire', 'item_use': 'item-use',
+                                    'inventory_interact': 'item-inventory-interact', 'block_interact': 'block-interact',
+                                    'block_statechange': 'block-statechange', 'mob_interact': 'mob-interact'}
+                        for event in events:
+                            if not isinstance(event, dict) or event.get('serverConfirmed') is not True or event.get('success') is not True: continue
+                            prefix, identifier = prefixes.get(event.get('kind')), event.get('id')
+                            if prefix and isinstance(identifier, str) and re.fullmatch(r'[a-z0-9_.-]+:[a-z0-9_./-]+', identifier):
+                                target = prefix + ':' + identifier
+                                record(target, 'scenario:server_confirmed_action')
+                                if target in known: proven_interactions.add(target)
+                    operator_command = evidence.get('operatorCommand') or {}
+                    if (task_definition['operator'] and isinstance(operator_command, dict)
+                            and operator_command.get('serverConfirmed') is True and operator_command.get('success') is True
+                            and operator_command.get('command')):
+                        record('permission:operator-command-success', 'scenario:server_confirmed_command_result')
+                        proven_interactions.add('permission:operator-command-success')
             for target, (count, evidence) in observed.items():
                 db.execute('INSERT INTO observations VALUES(?,?,?,?)', (run_id, target, count, json.dumps(sorted(evidence))))
             successful_targets = []
             if result.get('taskSuccess') is True and result.get('diagnosticPassed') is True:
-                if task_id and task_seen: successful_targets.append('task:' + task_id)
+                if task_id and task_seen:
+                    successful_targets.append('task:' + task_id)
+                    if actual_context:
+                        successful_targets.append(self._context_id(task_id, task_definition['gamemode'], task_definition['operator']))
+                    if scenario_proven: successful_targets.append('scenario:' + task_definition['scenario'])
+                successful_targets.extend(proven_interactions)
                 # Inventory possession, seeing a mob/block, or observing a packet does not prove a successful interaction.
                 for target in successful_targets:
                     db.execute('INSERT OR IGNORE INTO successes VALUES(?,?)', (run_id, target))
@@ -284,9 +402,13 @@ class CoverageInventory:
             for row in db.execute('SELECT * FROM targets ORDER BY kind,id'):
                 observed_runs, observations = counts.get(row['id'], (0, 0))
                 success = successes.get(row['id'], 0)
-                target = {'id': row['id'], 'kind': row['kind'], 'label': row['label'], 'supported': bool(row['supported']),
+                details = json.loads(row['details'])
+                action_proven = bool(observed_runs) and row['evidence_rule'].startswith('server_confirmed_')
+                supported = bool(row['supported']) or action_proven
+                if action_proven: details.update({'unsupportedReason': None, 'supportProvenByObservation': True})
+                target = {'id': row['id'], 'kind': row['kind'], 'label': row['label'], 'supported': supported,
                           'evidenceRule': row['evidence_rule'], 'observedRuns': observed_runs,
-                          'observations': observations, 'successfulRuns': success, **json.loads(row['details'])}
+                          'observations': observations, 'successfulRuns': success, **details}
                 if row['kind'] == 'task':
                     record = health.get(row['id'].removeprefix('task:'), {})
                     target['failures'] = record.get('failures', 0)
@@ -294,7 +416,7 @@ class CoverageInventory:
                 targets.append(target)
                 group = categories.setdefault(row['kind'], dict(requested=0, observed=0, successful=0, missing=0, unsupported=0))
                 group['requested'] += 1; group['observed'] += bool(observed_runs); group['successful'] += bool(success)
-                group['missing'] += not bool(observed_runs); group['unsupported'] += not bool(row['supported'])
+                group['missing'] += not bool(observed_runs); group['unsupported'] += not supported
             return {'categories': categories, 'targets': targets, 'taskHealth': list(health.values()),
                     'missing': [t['id'] for t in targets if not t['observedRuns']],
                     'unsupported': [t['id'] for t in targets if not t['supported']],

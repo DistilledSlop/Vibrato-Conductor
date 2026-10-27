@@ -104,7 +104,6 @@ class CoverageTests(unittest.TestCase):
             with self.assertRaises(ValueError): unsupported.choose('fixture', worlds=[{'id': 'fixture', 'tags': ['protocol-fixture']}])
 
 
-if __name__ == '__main__': unittest.main()
 
 
 class FailureSchedulingTests(unittest.TestCase):
@@ -143,9 +142,94 @@ class InteractionGapTests(unittest.TestCase):
                              'item-inventory-interact:minecraft:oak_log', 'block-interact:minecraft:stone',
                              'block-statechange:minecraft:stone', 'mob-interact:minecraft:zombie']:
                 self.assertIn(identity, targets)
-                self.assertFalse(targets[identity]['supported'])
+                if identity != 'block-statechange:minecraft:stone':
+                    self.assertFalse(targets[identity]['supported'])
                 self.assertEqual(targets[identity]['observedRuns'], 0)
                 self.assertEqual(targets[identity]['successfulRuns'], 0)
             self.assertEqual(targets['item:minecraft:oak_log']['observedRuns'], 1)
             self.assertEqual(targets['block:minecraft:stone']['observedRuns'], 1)
             self.assertEqual(targets['mob:minecraft:zombie']['observedRuns'], 1)
+
+
+class ModeCurriculumTests(unittest.TestCase):
+    def test_assignments_use_explicit_modes_permissions_and_world_compatibility(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cases = [('director', 'survival', False), ('creative_inventory', 'creative', False),
+                     ('creative_build', 'creative', False), ('adventure_inspect', 'adventure', False),
+                     ('spectator_explore', 'spectator', False), ('operator_commands', 'survival', True)]
+            for task_id, mode, operator in cases:
+                inventory = CoverageInventory(root / (task_id + '.sqlite'), enabled_tasks=[task_id])
+                assignment = inventory.choose(task_id + '-run')
+                self.assertEqual(assignment['gamemode'], mode)
+                self.assertEqual(assignment['operator'], operator)
+                if mode != 'survival':
+                    with self.assertRaisesRegex(ValueError, 'No supported task'):
+                        inventory.choose(task_id + '-wrong-world', worlds=[{'id': 'survival-only', 'gamemodes': ['survival']}])
+            operator = CoverageInventory(root / 'restricted-op.sqlite', enabled_tasks=['operator_commands'])
+            with self.assertRaisesRegex(ValueError, 'No supported task'):
+                operator.choose('no-op-world', worlds=[{'id': 'restricted', 'allowOperator': False}])
+
+    def test_actual_mode_and_server_permissions_are_separate_from_assignment(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            inventory = CoverageInventory(root / 'coverage.sqlite', enabled_tasks=['creative_inventory'])
+            assignment = inventory.choose('creative-run')
+            self.assertEqual(inventory.snapshot()['categories']['mode']['observed'], 0)
+            run = capture_run(root / 'runs', 'creative-run', task=assignment['task'], success=True, include_script=True)
+            heartbeat = {'actualMode': 'survival', 'permissionLevel': 0, 'permissionSource': 'server_observer',
+                         'abilities': {'creativeMode': False, 'allowFlying': False}}
+            (run / 'heartbeats.jsonl').write_text(json.dumps(heartbeat)+'\n')
+            result = json.loads((run / 'result.json').read_text())
+            atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            inventory.ingest(run)
+            targets = {t['id']: t for t in inventory.snapshot()['targets']}
+            self.assertEqual(targets['mode:survival']['observedRuns'], 1)
+            self.assertEqual(targets['mode:creative']['observedRuns'], 0)
+            self.assertEqual(targets['permission:non_operator']['observedRuns'], 1)
+            self.assertEqual(targets['task-context:creative_inventory:creative:non_operator']['observedRuns'], 0)
+
+    def test_confirmed_scenario_action_events_credit_only_specific_observed_facets(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            inventory = CoverageInventory(root / 'coverage.sqlite', enabled_tasks=['creative_inventory'])
+            assignment = inventory.choose('creative-good')
+            run = capture_run(root / 'runs', 'creative-good', task=assignment['task'], success=True, include_script=True)
+            heartbeat = {'actualMode': 'creative', 'permissionLevel': 0, 'permissionSource': 'server_observer',
+                         'abilities': {'creativeMode': True, 'allowFlying': True}}
+            (run / 'heartbeats.jsonl').write_text(json.dumps(heartbeat)+'\n')
+            atomic_json(run / 'scenario-result.json', {'scenario': 'creative_inventory', 'status': 'completed',
+                'source': 'client_actions_plus_server_observer', 'evidence': {'serverConfirmed': True, 'events': [
+                    {'kind': 'item_acquire', 'id': 'minecraft:diamond', 'serverConfirmed': True, 'success': True},
+                    {'kind': 'inventory_interact', 'id': 'minecraft:diamond', 'serverConfirmed': True, 'success': True},
+                    {'kind': 'item_use', 'id': 'minecraft:diamond', 'serverConfirmed': False, 'success': True}]}})
+            result = json.loads((run / 'result.json').read_text())
+            atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            inventory.ingest(run)
+            targets = {t['id']: t for t in inventory.snapshot()['targets']}
+            for identity in ['scenario:creative_inventory', 'task-context:creative_inventory:creative:non_operator',
+                             'item-acquire:minecraft:diamond', 'item-inventory-interact:minecraft:diamond']:
+                self.assertEqual(targets[identity]['observedRuns'], 1)
+                self.assertEqual(targets[identity]['successfulRuns'], 1)
+            self.assertEqual(targets['item-use:minecraft:diamond']['observedRuns'], 0)
+            self.assertFalse(targets['item-use:minecraft:diamond']['supported'])
+
+    def test_unconfirmed_permission_or_scenario_result_never_claims_coverage(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            inventory = CoverageInventory(root / 'coverage.sqlite', enabled_tasks=['operator_commands'])
+            assignment = inventory.choose('op-unconfirmed')
+            run = capture_run(root / 'runs', 'op-unconfirmed', task=assignment['task'], success=True, include_script=True)
+            (run / 'heartbeats.jsonl').write_text(json.dumps({'actualMode':'survival','permissionLevel':2,'permissionSource':'client_synced'})+'\n')
+            atomic_json(run / 'scenario-result.json', {'scenario':'operator_commands','status':'completed',
+                'source':'client_actions_plus_server_observer','evidence':{'serverConfirmed':True,
+                    'operatorCommand':{'command':'/time query daytime','serverConfirmed':True,'success':True}}})
+            result = json.loads((run / 'result.json').read_text())
+            atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            inventory.ingest(run)
+            targets = {t['id']:t for t in inventory.snapshot()['targets']}
+            self.assertEqual(targets['permission:operator']['observedRuns'],0)
+            self.assertEqual(targets['permission:operator-command-success']['observedRuns'],0)
+            self.assertEqual(targets['scenario:operator_commands']['observedRuns'],0)
+
+if __name__ == '__main__': unittest.main()

@@ -70,10 +70,19 @@ def inspect_world_bank(bank: Path) -> list[dict]:
             if config_path.is_symlink(): raise ValueError('Symlinked world metadata')
             config = json.loads(config_path.read_text()) if config_path.exists() else {}
             if not isinstance(config, dict): raise ValueError('World metadata must be an object')
+            gamemodes = config.get('gamemodes', ['survival', 'creative', 'adventure', 'spectator'])
+            if (not isinstance(gamemodes, list) or not gamemodes
+                    or any(mode not in ('survival', 'creative', 'adventure', 'spectator') for mode in gamemodes)):
+                raise ValueError('World gamemodes must be an explicit nonempty list of valid modes')
+            tags = config.get('tags', [])
+            if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+                raise ValueError('World tags must be a string list')
+            if not isinstance(config.get('allowOperator', True), bool): raise ValueError('allowOperator must be boolean')
             expected = config.get('revision')
             if expected and expected != revision['revision']: raise ValueError('World revision mismatch')
             worlds.append({'id': entry.name, 'revision': revision['revision'], 'logicalBytes': revision['logicalBytes'],
-                           'fileCount': revision['fileCount'], 'tags': config.get('tags', []),
+                           'fileCount': revision['fileCount'], 'tags': tags, 'gamemodes': gamemodes,
+                           'allowOperator': config.get('allowOperator', True),
                            'minecraftVersion': config.get('minecraftVersion', '1.21.1'),
                            'seed': config.get('seed'), 'supported': True})
         except (OSError, ValueError, TypeError) as error:
