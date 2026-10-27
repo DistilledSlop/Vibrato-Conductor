@@ -35,11 +35,12 @@ class BackendTests(unittest.TestCase):
         baseline = worker_env(self.config, self.spec)
         self.assertEqual(baseline['GAMEMODE'], 'survival')
         self.assertEqual(baseline['OPERATOR'], 'false')
+        self.assertEqual(baseline['OP_PERMISSION_LEVEL'], '2')
         creative = worker_env(self.config, {**self.spec, 'gamemode': 'creative', 'operator': True, 'scenario': 'creative-builder'})
         self.assertEqual(creative['GAMEMODE'], 'creative')
         self.assertEqual(creative['OPERATOR'], 'true')
         self.assertEqual(creative['SCENARIO'], 'creative-builder')
-        for spec in ({'gamemode': 'invented'}, {'operator': 'false'}, {'scenario': '../escape'}):
+        for spec in ({'gamemode': 'invented'}, {'operator': 'false'}, {'operatorLevel': 0}, {'operatorLevel': True}, {'scenario': '../escape'}):
             with self.subTest(spec=spec), self.assertRaises(ValueError): worker_env(self.config, {**self.spec, **spec})
 
     def test_docker_create_retry_adopts_created_container(self):

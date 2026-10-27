@@ -29,10 +29,13 @@ def command(argv, *, data=None, timeout=30):
 def worker_env(config, spec):
     gamemode = spec.get('gamemode', 'survival')
     operator = spec.get('operator', False)
+    operator_level = spec.get('operatorLevel', 2)
     scenario = spec.get('scenario')
     if gamemode not in ('survival', 'creative', 'adventure', 'spectator'):
         raise ValueError('Assignment gamemode must be a known Minecraft mode')
     if not isinstance(operator, bool): raise ValueError('Assignment operator must be boolean')
+    if isinstance(operator_level, bool) or not isinstance(operator_level, int) or not 1 <= operator_level <= 4:
+        raise ValueError('Assignment operatorLevel must be an integer between 1 and 4')
     if scenario is not None and not re.fullmatch(r'[a-z][a-z0-9_-]{0,63}', scenario):
         raise ValueError('Assignment scenario must be a safe identifier')
     env = dict(config.worker_env)
@@ -44,6 +47,7 @@ def worker_env(config, spec):
         'ACCEPT_OFFLINE': 'true' if config.accept_offline else 'false',
         'MAX_LOCAL_BYTES': str(config.storage_mb * 1024**2),
         'GAMEMODE': gamemode, 'OPERATOR': 'true' if operator else 'false',
+        'OP_PERMISSION_LEVEL': str(operator_level),
     })
     if scenario is not None: env['SCENARIO'] = scenario
     if spec.get('worldId'): env['WORLD_ID'] = spec['worldId']

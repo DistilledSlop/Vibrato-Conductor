@@ -339,6 +339,7 @@ class Fleet:
         spec.setdefault('worldId', None)
         spec.setdefault('gamemode', 'survival')
         spec.setdefault('operator', False)
+        spec.setdefault('operatorLevel', 2)
         self.db.execute('INSERT OR IGNORE INTO workers(run_id,backend_id,state,spec,created,updated) VALUES (?,?,?,?,?,?)',
                         (run_id, value['backendId'], 'pending' if value['state'] in ('completed', 'failed') else value['state'], json.dumps(spec), now, now))
         self._event('adopted', 'Recovered an owned worker from the runtime', run_id)
@@ -358,6 +359,7 @@ class Fleet:
         spec.setdefault('task', self.config.task)
         spec.setdefault('gamemode', 'survival')
         spec.setdefault('operator', False)
+        spec.setdefault('operatorLevel', 2)
         worker_env(self.config, spec)  # validate permissions before persisting or creating anything
         return spec
 
@@ -561,7 +563,7 @@ class Fleet:
                 workers.append({'runId': row['run_id'], 'backendId': row['backend_id'], 'state': row['state'],
                                 'task': spec['task'], 'worldId': spec.get('worldId'), 'seed': spec['seed'],
                                 'gamemode': spec.get('gamemode', 'survival'), 'operator': spec.get('operator', False),
-                                'scenario': spec.get('scenario'),
+                                'scenario': spec.get('scenario'), 'operatorLevel': spec.get('operatorLevel', 2),
                                 'assignment': spec, 'createdWall': row['created'], 'updatedWall': row['updated'],
                                 'reason': row['reason'], 'health': health, 'healthy': self._healthy(health, row['state']), 'result': result,
                                 'artifacts': str(self.config.artifacts_dir / row['run_id']),
