@@ -315,6 +315,9 @@ class Handler(BaseHTTPRequestHandler):
                 cookies = dict(pair.strip().split('=', 1) for pair in self.headers.get('Cookie', '').split(';') if '=' in pair)
                 with self.server.session_lock: self.server.sessions.pop(cookies.get('conductor_session', ''), None)
                 return self.json({'ok': True}, cookie='conductor_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+            if path == '/api/fleet/resume':
+                service.fleet.resume()
+                return self.json({'ok': True, 'message': 'Failure backoff reset; resource and storage gates remain enforced'})
             if path == '/api/fleet':
                 target = self.body().get('desired')
                 if isinstance(target, bool) or not isinstance(target, int): raise ValueError('desired must be an integer')

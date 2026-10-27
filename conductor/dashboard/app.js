@@ -40,6 +40,7 @@ function updateState(next){
   $('runtimeType').textContent=(state.backend==='kubernetes'?'Kubernetes':'Docker')+' runtime';
   $('subtitle').textContent=`${state.fleetId||'Default fleet'} · ${state.config?.mode||'diagnostic'} mode · Minecraft 1.21.1`;
   const error=state.controller?.error||state.controller?.deliveryError;const notice=error||state.pausedReason;
+  $('resume').hidden=!['failure_circuit_open','failure_backoff'].includes(state.pausedReason);
   $('notice').hidden=!notice;$('notice').textContent=error?`Controller needs attention: ${error}`:notice?`New starts paused: ${notice.replaceAll('_',' ')}`:'';
   $('connectionDot').classList.toggle('error',!!error);$('connectionText').textContent=error?'Reconciler degraded':'Live connection';
   $('refreshed').textContent='Updated '+new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -61,7 +62,7 @@ function createCard(w){
   const card=make('article','worker-card');card.dataset.runId=w.runId;
   const screen=make('button','thumbnail');screen.setAttribute('aria-label',`Inspect worker ${w.runId}`);screen.addEventListener('click',()=>openWorker(w.runId));
   const no=make('div','no-screen');no.append(make('span','', '▧'),make('div','', 'Waiting for the client display'));
-  const image=make('img');image.alt=`Live Minecraft view for ${w.runId}`;image.loading='lazy';image.hidden=true;image.addEventListener('load',()=>{image.hidden=false;no.hidden=true;});image.addEventListener('error',()=>{image.hidden=true;no.hidden=false;});
+  const image=make('img');image.alt=`Live Minecraft view for ${w.runId}`;image.loading='eager';image.hidden=true;image.addEventListener('load',()=>{image.hidden=false;no.hidden=true;});image.addEventListener('error',()=>{image.hidden=true;no.hidden=false;});
   const overlay=make('div','overlay');const status=make('span');const stamp=make('span','', 'LIVE');overlay.append(status,stamp);screen.append(no,image,overlay);
   const body=make('div','card-body'),title=make('div','card-title'),name=make('span','card-name',shortId(w.runId)),runtime=make('span','pill neutral');title.append(name,runtime);
   const world=make('div','card-world'),task=make('div','card-task'),leaf=make('div','card-leaf'),metrics=make('div','card-metrics');body.append(title,world,task,leaf,metrics);card.append(screen,body);
@@ -96,6 +97,7 @@ function renderGaps(){const coverage=coverageInventory||state?.coverage||{},quer
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();$('loginError').textContent='';const token=$('token').value;try{await api('/api/session',{method:'POST',body:JSON.stringify({token})});$('token').value='';await poll();}catch(error){$('loginError').textContent=error.message;}});
 $('logout').addEventListener('click',async()=>{await api('/api/logout',{method:'POST',body:'{}'});setAuthenticated(false);});
 $('scaleForm').addEventListener('submit',async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{await api('/api/fleet',{method:'POST',body:JSON.stringify({desired:Number($('target').value)})});toast('Fleet target updated');await poll();}catch(error){toast(error.message,true);}finally{button.disabled=false;}});
+$('resume').addEventListener('click',async()=>{try{await api('/api/fleet/resume',{method:'POST',body:'{}'});toast('Backoff reset; resource and storage limits remain active');await poll();}catch(e){toast(e.message,true);}});
 $('refresh').addEventListener('click',()=>{poll();for(const id of visible)refreshThumbnail(id,true);});
 for(const button of document.querySelectorAll('[data-filter]'))button.addEventListener('click',()=>{filter=button.dataset.filter;document.querySelectorAll('[data-filter]').forEach(b=>b.classList.toggle('active',b===button));renderWorkers();});
 for(const button of document.querySelectorAll('[data-view]'))button.addEventListener('click',()=>{view=button.dataset.view;document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',b===button));renderWorkers();});

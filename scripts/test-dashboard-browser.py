@@ -24,16 +24,17 @@ with sync_playwright() as p:
     assert page.locator('#console').is_visible()
     page.get_by_role('button', name='Inspect gaps').click()
     page.get_by_label('Filter targets').fill('oak_log')
-    page.wait_for_function("document.querySelectorAll('#gapList .gap-row').length > 0")
+    page.locator('#gapList .gap-row').first.wait_for(state='visible')
     page.get_by_role('button', name='Close coverage gaps').click()
     if args.with_workers:
-        page.wait_for_function("document.querySelectorAll('.worker-card').length > 0", timeout=30000)
-        page.wait_for_function("[...document.querySelectorAll('.thumbnail img')].some(i => i.naturalWidth > 0)", timeout=45000)
+        page.locator('.worker-card').first.wait_for(state='visible',timeout=30000)
+        page.locator('.thumbnail img:not([hidden])').first.wait_for(state='visible',timeout=45000)
         card = page.locator('.worker-card').filter(has=page.locator('img:not([hidden])')).first
         card.locator('button.thumbnail').click()
-        page.wait_for_function("document.querySelector('#detailFrame')?.naturalWidth > 0", timeout=10000)
+        page.locator('#detailFrame').wait_for(state='visible',timeout=10000)
         previous = page.locator('#detailFrame').get_attribute('src')
-        page.wait_for_function("previous => document.querySelector('#detailFrame').src.endsWith(previous) === false", arg=previous, timeout=20000)
+        page.wait_for_timeout(16000)
+        assert page.locator('#detailFrame').get_attribute('src') != previous, 'Inspection frame did not refresh'
         page.screenshot(path=str(args.output / 'inspection.png'), full_page=True)
         page.get_by_role('button', name='Close worker details').click()
         page.get_by_role('button', name='Table view').click()

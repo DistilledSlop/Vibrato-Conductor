@@ -61,6 +61,7 @@ class Test:
     def run(self):
         self.start()
         if self.api()['desired']!=0:raise ValueError('Test requires initially drained fleet')
+        self.api('/api/fleet/resume',{})
         self.api('/api/fleet',{'desired':2})
         self.wait(lambda:len(self.healthy())==2,'two real workers healthy')
         initial={w['runId'] for w in self.active()}

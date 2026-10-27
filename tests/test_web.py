@@ -22,6 +22,7 @@ class FakeFleet:
         if n<0 or n>4: raise ValueError('Target exceeds capacity')
         self.target=n
     def stop_worker(self, run_id, replace=False): self.actions.append((run_id, replace))
+    def resume(self): self.actions.append(('resume',False))
     def set_inhibited(self, reason=None): self.inhibited=reason
     def close(self): pass
 
@@ -72,6 +73,8 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.request('/api/fleet',{'desired':9},True)[0],400)
         self.assertEqual(self.request('/api/workers/test-run/replace',{},True)[0],202)
         self.assertEqual(self.fleet.actions,[('test-run',True)])
+        self.assertEqual(self.request('/api/fleet/resume',{},True)[0],200)
+        self.assertEqual(self.fleet.target,2)
     def test_artifact_paths_cannot_escape_run_directory(self):
         self.assertEqual(self.request('/api/artifacts/test-run/logs/client.log',auth=True)[0],200)
         self.assertEqual(self.request('/api/artifacts/test-run/%2e%2e/secret.txt',auth=True)[0],404)
