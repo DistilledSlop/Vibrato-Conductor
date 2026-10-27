@@ -29,6 +29,7 @@ def snapshot_world(source: Path, destination: Path, max_bytes=256*1024**2, secon
             logical+=path.stat().st_size
             if logical>max_bytes: raise SnapshotLimit('logical_size_limit')
             files.append(path)
+            if len(files)>20000: raise SnapshotLimit('file_count_limit')
         if not files: raise SnapshotLimit('world_empty')
         class BoundedWriter(io.RawIOBase):
             def __init__(self, stream): self.stream=stream; self.written=0
