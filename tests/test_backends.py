@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from conductor.backends import BackendError, DockerBackend, KubernetesBackend, FLEET_LABEL, RUN_LABEL, WORKER_LABEL
+from conductor.backends import BackendError, DockerBackend, KubernetesBackend, FLEET_LABEL, RUN_LABEL, WORKER_LABEL, worker_env
 from conductor.fleet import FleetConfig
 
 
@@ -30,6 +30,17 @@ class BackendTests(unittest.TestCase):
         self.assertTrue(next(v for v in container['volumeMounts'] if v['name']=='world-bank')['readOnly'])
         self.assertEqual(next(v for v in container['env'] if v['name']=='RUN_ID')['value'], 'run-001')
         self.assertEqual(manifest['metadata']['labels'][FLEET_LABEL], 'test')
+
+    def test_assignment_modes_and_operator_permissions_are_explicit(self):
+        baseline = worker_env(self.config, self.spec)
+        self.assertEqual(baseline['GAMEMODE'], 'survival')
+        self.assertEqual(baseline['OPERATOR'], 'false')
+        creative = worker_env(self.config, {**self.spec, 'gamemode': 'creative', 'operator': True, 'scenario': 'creative-builder'})
+        self.assertEqual(creative['GAMEMODE'], 'creative')
+        self.assertEqual(creative['OPERATOR'], 'true')
+        self.assertEqual(creative['SCENARIO'], 'creative-builder')
+        for spec in ({'gamemode': 'invented'}, {'operator': 'false'}, {'scenario': '../escape'}):
+            with self.subTest(spec=spec), self.assertRaises(ValueError): worker_env(self.config, {**self.spec, **spec})
 
     def test_docker_create_retry_adopts_created_container(self):
         backend = DockerBackend(self.config)

@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -26,6 +27,14 @@ def command(argv, *, data=None, timeout=30):
 
 
 def worker_env(config, spec):
+    gamemode = spec.get('gamemode', 'survival')
+    operator = spec.get('operator', False)
+    scenario = spec.get('scenario')
+    if gamemode not in ('survival', 'creative', 'adventure', 'spectator'):
+        raise ValueError('Assignment gamemode must be a known Minecraft mode')
+    if not isinstance(operator, bool): raise ValueError('Assignment operator must be boolean')
+    if scenario is not None and not re.fullmatch(r'[a-z][a-z0-9_-]{0,63}', scenario):
+        raise ValueError('Assignment scenario must be a safe identifier')
     env = dict(config.worker_env)
     env.update({
         'RUN_ID': spec['runId'], 'SEED': str(spec['seed']), 'TASK': spec['task'],
@@ -34,7 +43,9 @@ def worker_env(config, spec):
         'ACCEPT_EULA': 'true' if config.accept_eula else 'false',
         'ACCEPT_OFFLINE': 'true' if config.accept_offline else 'false',
         'MAX_LOCAL_BYTES': str(config.storage_mb * 1024**2),
+        'GAMEMODE': gamemode, 'OPERATOR': 'true' if operator else 'false',
     })
+    if scenario is not None: env['SCENARIO'] = scenario
     if spec.get('worldId'): env['WORLD_ID'] = spec['worldId']
     if config.allow_world_copy: env['ALLOW_WORLD_COPY'] = 'true'
     return env
