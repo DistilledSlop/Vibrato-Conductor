@@ -23,8 +23,10 @@ from conductor.storage import digest, verify_manifest
 
 
 class Test:
-    def __init__(self, port):
+    def __init__(self, port, image, healthy_pause):
         self.port = port
+        self.image = image
+        self.healthy_pause = healthy_pause
         self.base = f'http://127.0.0.1:{port}'
         self.token = (STATE / 'dashboard.token').read_text().strip()
         self.forward = None
@@ -99,12 +101,12 @@ class Test:
         (catalog / 'tasks.json').write_text(json.dumps(tasks, indent=2) + '\n')
         config_map = self.json_kube('-n', 'vibrato', 'get', 'configmap', 'vibrato-controller-config')
         config = json.loads(config_map['data']['fleet.json'])
-        config.update({'desired': 0, 'max_workers': 1, 'cpus': 8, 'cpu_budget': 8,
+        config.update({'desired': 0, 'image': self.image, 'max_workers': 1, 'cpus': 8, 'cpu_budget': 8,
             'accept_eula': True, 'accept_offline': True,
             'enabled_tasks': ['director'], 'catalog_dir': '/data/live-test-catalog', 'seconds': 45,
             'stagger_seconds': 3, 'reconcile_seconds': 2, 'failure_backoff_seconds': 3,
             'max_failure_backoff_seconds': 15, 'circuit_pause_seconds': 30,
-            'worker_env': {'LP_NUM_THREADS': '2'},
+            'worker_env': {**config.get('worker_env', {}), 'LP_NUM_THREADS': '2'},
             'unhealthy_grace_seconds': 5, 'world_bank_pvc': 'vibrato-world-bank',
             'world_bank': '/world-bank', 'world_ids': ['seed-424242'], 'allow_world_copy': True})
         patch = {'data': {'fleet.json': json.dumps(config, indent=2)}}
@@ -128,7 +130,10 @@ class Test:
         self.api('/api/fleet', {'desired': 1})
         first = self.wait(lambda: next((w for w in self.active() if w.get('healthy')), None), 'first Kubernetes worker healthy')
         first_id = first['runId']
-        self.record('real_kubernetes_worker_healthy', runId=first_id)
+        self.record('real_kubernetes_worker_healthy', runId=first_id, health=first.get('health'))
+        if self.healthy_pause:
+            print(f'Healthy baseline inspection window: {self.healthy_pause}s', flush=True)
+            time.sleep(self.healthy_pause)
         # Existing assignment keeps 120s; only assignments selected after this restart use 45s.
         tasks = json.loads((catalog / 'tasks.json').read_text())
         for task in tasks['tasks']:
@@ -170,10 +175,13 @@ def main():
     parser.add_argument('--accept-eula', action='store_true')
     parser.add_argument('--accept-offline', action='store_true')
     parser.add_argument('--port', type=int, default=8091)
+    parser.add_argument('--image', default='vibrato-worker:dev')
+    parser.add_argument('--healthy-pause', type=float, default=25)
     args = parser.parse_args()
     if args.exercise and not (args.accept_eula and args.accept_offline):
         parser.error('--exercise requires --accept-eula and --accept-offline')
-    test = Test(args.port)
+    if not 0 <= args.healthy_pause <= 60: parser.error('--healthy-pause must be 0-60 seconds')
+    test = Test(args.port, args.image, args.healthy_pause)
     current = test.kube('config', 'current-context').strip()
     if current != 'kind-vibrato-conductor-test': raise RuntimeError('Refusing to modify a non-test Kubernetes context')
     result = {}
