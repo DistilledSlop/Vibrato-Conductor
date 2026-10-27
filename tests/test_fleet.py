@@ -117,6 +117,18 @@ class FleetTests(unittest.TestCase):
         self.fleet.reconcile()
         self.assertEqual(self.runtime.stops, [run_id])
 
+    def test_missing_or_slow_game_ticks_never_count_as_healthy(self):
+        self.fleet.set_target(1)
+        run_id = self.fleet.reconcile()['workers'][0]['runId']
+        self.health(run_id, serverTps=None)
+        self.assertEqual(self.fleet.reconcile()['counts']['healthy'], 0)
+        self.health(run_id, serverTps=10)
+        self.assertEqual(self.fleet.reconcile()['counts']['healthy'], 0)
+        self.health(run_id)
+        self.assertEqual(self.fleet.reconcile()['counts']['healthy'], 1)
+        self.clock.advance(11)
+        self.assertEqual(self.fleet.snapshot()['counts']['healthy'], 0)
+
     def test_target_zero_stops_existing_workers_without_replacement(self):
         self.fleet.set_target(1)
         run_id = self.fleet.reconcile()['workers'][0]['runId']

@@ -220,12 +220,16 @@ class Fleet:
             if not memory: memory = max(0, values.get('MemTotal', 0) / 1024 - 2048)
         except (OSError, ValueError):
             if not memory: memory = config.memory_mb * config.max_workers
-        disk_free = shutil.disk_usage(config.workspace_dir).free // 1024**2
-        storage = config.storage_budget_mb or max(0, disk_free - config.free_disk_reserve_mb)
+        disk_root = config.artifacts_dir if config.backend == 'kubernetes' else config.workspace_dir
+        disk_free = shutil.disk_usage(disk_root).free // 1024**2
+        # Kubernetes temporary storage is admitted by the scheduler, not the controller's state PVC.
+        storage = config.storage_budget_mb or (config.storage_mb * config.max_workers if config.backend == 'kubernetes'
+                                               else max(0, disk_free - config.free_disk_reserve_mb))
         count = max(0, min(config.max_workers, int(cpus // config.cpus), int(memory // config.memory_mb), int(storage // config.storage_mb)))
         pressure = None
         if available is not None and available < config.memory_mb + 1024: pressure = 'host_memory_pressure'
-        if disk_free < config.storage_mb + config.free_disk_reserve_mb: pressure = 'host_storage_pressure'
+        disk_needed = min(config.storage_mb, 1024) if config.backend == 'kubernetes' else config.storage_mb
+        if disk_free < disk_needed + config.free_disk_reserve_mb: pressure = 'host_storage_pressure'
         # CPU pressure requires sustained scheduling stalls, not a load-average guess.
         try:
             cpu_pressure = float(Path('/proc/pressure/cpu').read_text().split('avg10=')[1].split()[0])
@@ -246,6 +250,9 @@ class Fleet:
 
     def _health_problem(self, row, backend, health, now):
         age = now - row['created']
+        spec = json.loads(row['spec'])
+        if age > spec.get('seconds', self.config.seconds) + self.config.startup_timeout * 4 + 120:
+            return 'worker_absolute_lifetime_limit'
         if backend['state'] == 'unhealthy': return backend.get('reason') or 'runtime_unhealthy'
         if health is None:
             return 'missing_worker_health' if age > self.config.startup_timeout else None
@@ -257,11 +264,29 @@ class Fleet:
         if phase == 'starting': return 'worker_startup_timeout' if age > self.config.startup_timeout else None
         if phase in ('stopping', 'completed'): return None
         for key in ('heartbeatAge', 'captureAge', 'serverHeartbeatAge'):
-            if health.get(key) is None or health[key] > self.config.health_timeout:
+            if (not isinstance(health.get(key), (int, float)) or not math.isfinite(health[key])
+                    or health[key] < 0 or health[key] > self.config.health_timeout):
                 return key + '_timeout' if age > self.config.startup_timeout else None
+        if age > self.config.startup_timeout and any(
+                not isinstance(health.get(key), (int, float)) or not math.isfinite(health[key])
+                for key in ('clientTps', 'serverTps')):
+            return 'missing_game_tick_health'
         if classification.get('kind') == 'overload' and classification.get('confidence') == 'confirmed':
             return classification.get('reason') or 'worker_overload'
         return None
+
+    def _healthy(self, health, state):
+        if state != 'running' or not health or health.get('phase') != 'running': return False
+        wall = health.get('wall')
+        if not isinstance(wall, (int, float)) or not math.isfinite(wall) or not 0 <= self.clock() - wall <= self.config.health_timeout:
+            return False
+        for key in ('heartbeatAge', 'captureAge', 'serverHeartbeatAge'):
+            value = health.get(key)
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= self.config.health_timeout: return False
+        for key in ('clientTps', 'serverTps'):
+            value = health.get(key)
+            if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 18: return False
+        return not health.get('classification')
 
     def _verify_result(self, row):
         root = self.config.artifacts_dir / row['run_id']
@@ -489,11 +514,11 @@ class Fleet:
                 workers.append({'runId': row['run_id'], 'backendId': row['backend_id'], 'state': row['state'],
                                 'task': spec['task'], 'worldId': spec.get('worldId'), 'seed': spec['seed'],
                                 'assignment': spec, 'createdWall': row['created'], 'updatedWall': row['updated'],
-                                'reason': row['reason'], 'health': health, 'result': result,
+                                'reason': row['reason'], 'health': health, 'healthy': self._healthy(health, row['state']), 'result': result,
                                 'artifacts': str(self.config.artifacts_dir / row['run_id']),
                                 'artifactsVerified': bool(row['finalized']), 'removed': bool(row['removed'])})
             counts = {name: sum(w['state'] == name for w in workers) for name in sorted(ACTIVE | TERMINAL)}
-            counts['healthy'] = counts.get('running', 0)
+            counts['healthy'] = sum(w['healthy'] for w in workers)
             counts['active'] = sum(counts.get(name, 0) for name in ACTIVE)
             events = [{'id': r['id'], 'wall': r['wall'], 'kind': r['kind'], 'runId': r['run_id'], 'message': r['message']}
                       for r in self.db.execute('SELECT * FROM events ORDER BY id DESC LIMIT ?', (self.config.event_limit,))]
