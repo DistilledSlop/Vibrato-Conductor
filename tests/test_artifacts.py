@@ -322,4 +322,25 @@ class CurriculumAdmissionTests(unittest.TestCase):
             atomic_json(run / 'manifest.json', artifact_manifest(run, result))
             self.assertIn('scenario_server_outcome_unconfirmed', quality_report(run)['reasons'])
 
+
+
+class OptimizationAdmissionTests(unittest.TestCase):
+    def test_unvalidated_optimization_profiles_cannot_override_worker_collection_approval(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = finalized(root, mode='collection', success=True)
+            metadata = json.loads((run / 'metadata.json').read_text())
+            metadata['versions']['optimizationMods'] = [{'modId':'ferritecore','sha256':'a'*64}]
+            metadata['versions']['optimizationProfile'] = {'id':'ferritecore','experimental':True,
+                'behaviorValidated':False,'behaviorValidation':'unvalidated'}
+            atomic_json(run / 'metadata.json',metadata)
+            result = json.loads((run / 'result.json').read_text())
+            atomic_json(run / 'manifest.json',artifact_manifest(run,result))
+            self.assertIn('experimental_optimization_profile_unvalidated',quality_report(run)['reasons'])
+            metadata['versions']['optimizationProfile']['behaviorValidated']=True
+            metadata['versions']['optimizationProfile']['behaviorValidation']='reviewed_equivalent'
+            atomic_json(run / 'metadata.json',metadata)
+            atomic_json(run / 'manifest.json',artifact_manifest(run,result))
+            self.assertFalse(quality_report(run)['eligible'])
+
 if __name__ == '__main__': unittest.main()

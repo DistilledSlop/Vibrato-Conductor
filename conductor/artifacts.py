@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import fcntl
 import math
 import os
+import re
 import shutil
 import sqlite3
 import threading
@@ -101,6 +102,29 @@ def quality_report(root: Path) -> dict:
             except (OSError, ValueError, AttributeError, TypeError): confirmed = False
             if not confirmed: reasons.append('scenario_server_outcome_unconfirmed')
     versions = metadata.get('versions', {})
+    if versions.get('optimizationMods'):
+        profile = versions.get('optimizationProfile') or {}
+        # The optional evaluation builder only emits unvalidated profiles. A future reviewed profile must
+        # bind every required behavior scenario and the exact added mod hashes, not just claim faster ticks.
+        required = {'survival_resource', 'creative_inventory', 'creative_build', 'adventure_inspect',
+                    'spectator_explore', 'operator_commands', 'mob_ai', 'block_physics', 'redstone',
+                    'containers', 'nether', 'gamer'}
+        review = profile.get('behaviorEvidence') or {} if isinstance(profile, dict) else {}
+        scenarios = review.get('scenarios') or {} if isinstance(review, dict) else {}
+        mod_hashes = review.get('modSha256') or {} if isinstance(review, dict) else {}
+        declared_mods = versions['optimizationMods']
+        reviewed = (isinstance(profile, dict) and profile.get('behaviorValidated') is True
+            and profile.get('behaviorValidation') == 'reviewed_equivalent' and isinstance(review, dict)
+            and bool(review.get('reviewedBy')) and bool(review.get('reviewedAt'))
+            and isinstance(scenarios, dict) and required.issubset(scenarios)
+            and all(isinstance(scenarios[name], dict) and scenarios[name].get('verdict') == 'equivalent'
+                    and re.fullmatch('[0-9a-f]{64}', str(scenarios[name].get('baselineManifestSha256', '')))
+                    and re.fullmatch('[0-9a-f]{64}', str(scenarios[name].get('candidateManifestSha256', '')))
+                    for name in required)
+            and isinstance(declared_mods, list) and isinstance(mod_hashes, dict)
+            and all(isinstance(mod, dict) and mod_hashes.get(mod.get('modId')) == mod.get('sha256')
+                    and re.fullmatch('[0-9a-f]{64}', str(mod.get('sha256', ''))) for mod in declared_mods))
+        if not reviewed: reasons.append('experimental_optimization_profile_unvalidated')
     if versions.get('minecraft') != '1.21.1' or not metadata.get('build'):
         reasons.append('software_identity_missing')
     world = metadata.get('world', {})
