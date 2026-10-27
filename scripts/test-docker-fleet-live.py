@@ -112,8 +112,10 @@ def main():
     try:test.run();success=True
     finally:
         if test.process is not None:
-            try:test.api('/api/fleet',{'desired':0})
-            except Exception:pass
+            try:
+                test.api('/api/fleet',{'desired':0})
+                test.wait(lambda:test.api()['counts']['active']==0,'cleanup drain',180)
+            except Exception as error:print('Cleanup requires inspection:',error,flush=True)
         if not success or not args.keep_dashboard:test.stop()
         test.save()
     print('Docker fleet integration passed',flush=True)

@@ -1,28 +1,87 @@
 # Vibrato Conductor
 
-Runs Minecraft 1.21.1 clients with Vibrato through the Protocol Transformer recording proxy, each against its own Fabric server.
+A persistent fleet controller for Minecraft 1.21.1 data collection. Each worker runs a real Vibrato client → recording proxy → its own Fabric server. Worlds are isolated copies of an immutable bank; captures and diagnostic evidence survive worker replacement.
 
-The first implementation provides a single Docker worker, a local CLI, isolated world-bank copies, and durable filesystem artifacts. It includes Xvfb/Mesa, process supervision, client heartbeats, bounded captures, shutdown flushing, and checksummed run manifests. Every run is diagnostic and excluded from training by default. Fleet reconciliation, Kubernetes scheduling, dashboard, authoritative behavior watchdogs, remote uploads, and coverage scheduling remain planned in [the requirements](docs/requirements.md).
+The controller provides Docker and Kubernetes backends, restart recovery, paced resource-limited launches, crash/unhealthy replacement, failure backoff, coverage-driven assignments, verified artifact delivery, and an authenticated monitoring dashboard. The gallery updates visible worker screenshots every 15 seconds; open a card for a larger screen, task state, tick health, process logs, and retained evidence.
 
-Requires Docker, Python 3.11+, and the sibling `Vibrato`, `Protocol-Transformer`, and patched `Baritone` repositories. No Node or Python packages need installing on the host. Build/download steps need internet; worker runs use an isolated network namespace with no external connectivity or published game ports.
+## Run locally
+
+Requires Docker and Python 3.11+. Building Vibrato requires Java 21 and the sibling patched Baritone checkout. Game/runtime dependencies live inside the images.
 
 ```bash
 cd /opt/Vibrato
 ./gradlew test build -PbaritoneDist=/opt/Baritone/dist
 cd /opt/Vibrato-Conductor
 python3 scripts/build-worker.py
+python3 scripts/build-controller.py
 
-# Read and accept the Minecraft EULA before using --accept-eula.
-python3 -m conductor run --id smoke-001 --seconds 60 \
-  --accept-eula --accept-offline --wait
-python3 -m conductor status
-python3 -m conductor verify .state/artifacts/smoke-001
+cp deploy/fleet.docker.example.json .state/fleet-local.json
+# Review paths, resource budgets, world bank, and enabled tasks in that file.
+# Set accept_eula/accept_offline only after accepting those operating conditions.
+python3 -m conductor serve --config .state/fleet-local.json --port 8080
 ```
 
-Default limits are 4 CPUs and 6 GiB for the combined worker; these are initial smoke-test limits, not measured fleet sizing. Set `--cpus`, `--memory`, and `--seconds` explicitly for experiments. Baseline rendering uses the normal Vibrato profile; `--perf low` explicitly enables the existing rendering reductions and records that choice. No optimization mods are added.
+Open **http://127.0.0.1:8080/**. Read the access-token file printed on startup and paste it into the console. The initial fleet target is zero; use the dashboard to start workers. Keep the token out of Git and chat. Remote access should use an authenticated tunnel or an operator-managed TLS ingress.
 
-`--task '@nether'`, `--task '@gamer'`, or another single Vibrato command creates a bounded scripted diagnostic assignment. The default `director` runs seeded autonomous activity. A passed worker diagnostic proves the connection, telemetry, script exit, and flushed capture structure; it does not prove task success, coverage completeness, or sustainable capacity.
+The starting headless profile uses an explicit CPU/memory limit and software rendering thread budget. Size against **measured client and server tick health**, including rendering, server, proxy, and supervisor costs. A process being alive is insufficient. The shipped worker ceiling is deliberately one; raise it only after running capacity tests on the deployment host.
 
-Real single-worker diagnostics passed; see [the validation record](docs/validation-2026-10-27.md).
+```bash
+python3 -m conductor scale 2 --token-file .state/fleet/dashboard.token
+python3 -m conductor fleet-status --token-file .state/fleet/dashboard.token
+```
 
-See [worker operation](docs/worker.md) for storage, world banks, failure handling, testing, and remaining limitations.
+Use **Retry after fix** to clear a recorded failure backoff once its cause has been addressed. Resource, storage, acceptance, and desired-count limits still apply. Stop reduces the target; Replace preserves it and creates a fresh run/world copy.
+
+## World bank
+
+The 50 supplied saves have been registered at `/opt/world-bank/world1/world` through `/opt/world-bank/world50/world`. All are Minecraft 1.21.1. Their complete content fingerprints, exact source seeds, original gamemodes, stored chunk bounds, and origins are recorded in each entry's `world.json`; the import report is `.state/world-import/report.json`. No second full copy was made.
+
+```text
+/opt/world-bank/
+  world1/
+    world.json
+    world/
+      level.dat
+      region/
+      ...
+```
+
+Creative pregeneration is supported. Each private server sets its assigned mode, enforces it for joining players, and grants operator privileges only when the assignment explicitly requires them. A template's Creative mode or integrated-server cheats flag does not grant the collection bot operator access. Actual mode and permission levels are verified from the server observer.
+
+Configure `world_bank`, `world_ids`, and `allow_world_copy`. The bank is mounted read-only. Copies prefer reflinks; unsupported filesystems require explicit full-copy fallback with recorded disk cost. Region-header bounds describe saved chunks; they do not certify a particular complete pregeneration radius.
+
+Register additional stopped saves with:
+
+```bash
+python3 scripts/import-world-bank.py /path/to/saves /opt/world-bank --move
+```
+
+The move option requires the same filesystem; `--copy` explicitly permits a full copy. Existing bank entries are never overwritten. Do not open bank templates for play or modify them while workers use them; edit a separate copy and import it as a new revision.
+
+## Tasks, modes, and data
+
+Assignments separate gamemode from permissions. Ordinary gathering/progression is Survival without OP. Controlled Creative inventory/build/flying, Adventure restrictions, Spectator pass-through, and operator-command scenarios exercise distinct behavior. Exact task definitions, budgets, prerequisites, and evidence rules live in [catalogs](catalogs/README.md).
+
+A single explicit scenario can be run without the fleet:
+
+```bash
+python3 -m conductor run --id creative-probe-001 --seconds 90 \
+  --task '@conductor_scenario creative_inventory' --gamemode creative \
+  --cpus 8 --render-threads 2 --accept-eula --accept-offline --wait
+```
+
+The inventory separates requested targets, observed evidence, task success, missing targets, and unsupported interactions. Scheduling a task never proves coverage. Raw protocol IDs are scoped by phase and direction. Model input rows also retain actual initial gamemode, abilities, and server permission context. Rebuild preprocessing/vocabulary when adopting the updated reader; old checkpoints do not gain those new context tokens automatically.
+
+Every run is diagnostic by default. Training admission additionally requires explicit collection mode, confirmed task success, matched actual mode/permission context, complete captures, valid cumulative tick measurements, verified software/world identity, and no invalidating watchdog classification. Experimental optimization profiles remain excluded pending behavior review.
+
+## Deployment and checks
+
+See [deployment](deploy/README.md), [worker operation](docs/worker.md), [operator guide](docs/operations.md), [performance experiments](docs/performance.md), and the [requirements](docs/requirements.md).
+
+```bash
+python3 -m unittest discover -s tests -v
+python3 scripts/test-cluster.py up
+python3 scripts/test-cluster.py load --image vibrato-worker:dev --image vibrato-controller:dev
+```
+
+Live test scripts create real game workers and retain their evidence under `.state/`; use a separate test fleet/configuration. Raw saves, credentials, captures, and local test state are excluded from Git. The original [single-worker validation](docs/validation-2026-10-27.md) is historical; later fleet/curriculum results are recorded separately.
