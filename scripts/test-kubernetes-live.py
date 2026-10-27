@@ -103,7 +103,7 @@ class Test:
         config = json.loads(config_map['data']['fleet.json'])
         config.update({'desired': 0, 'image': self.image, 'max_workers': 1, 'cpus': 8, 'cpu_budget': 8,
             'accept_eula': True, 'accept_offline': True,
-            'enabled_tasks': ['director'], 'catalog_dir': '/data/live-test-catalog', 'seconds': 45,
+            'enabled_tasks': ['director'], 'catalog_dir': '/data/live-test-catalog', 'seconds': 75,
             'stagger_seconds': 3, 'reconcile_seconds': 2, 'failure_backoff_seconds': 3,
             'max_failure_backoff_seconds': 15, 'circuit_pause_seconds': 30,
             'worker_env': {**config.get('worker_env', {}), 'LP_NUM_THREADS': '2'},
@@ -134,10 +134,10 @@ class Test:
         if self.healthy_pause:
             print(f'Healthy baseline inspection window: {self.healthy_pause}s', flush=True)
             time.sleep(self.healthy_pause)
-        # Existing assignment keeps 120s; only assignments selected after this restart use 45s.
+        # Existing assignment keeps 120s; only assignments selected after this restart use 75s.
         tasks = json.loads((catalog / 'tasks.json').read_text())
         for task in tasks['tasks']:
-            if task['id'] == 'director': task['seconds'] = 45
+            if task['id'] == 'director': task['seconds'] = 75
         (catalog / 'tasks.json').write_text(json.dumps(tasks, indent=2) + '\n')
         self.controller_restart()
         self.wait(lambda: len(self.active()) == 1 and self.active()[0]['runId'] == first_id, 'adoption after controller restart', timeout=60)
