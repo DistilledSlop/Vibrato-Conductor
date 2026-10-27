@@ -15,9 +15,13 @@ ENV PATH="/opt/python/bin:${PATH}" LIBGL_ALWAYS_SOFTWARE=1 DISPLAY=:99 \
     VIBRATO_FLEET_HOME=/opt/game
 COPY proxy/package*.json /opt/proxy/
 RUN cd /opt/proxy && npm ci --omit=dev
-COPY vibrato/ /opt/vibrato/
+COPY vibrato/gradle.properties /opt/vibrato/gradle.properties
+COPY vibrato/scripts/fleet/launch.py /opt/vibrato/scripts/fleet/launch.py
 COPY install.py /opt/install.py
 RUN python3 -u /opt/install.py
+COPY vibrato/build/libs/ /opt/game/mods/
+COPY vibrato/build/server-mods/ /opt/server/mods/
+RUN python3 /opt/install.py --finalize-mods
 RUN (getent passwd 1000 >/dev/null || useradd -m -u 1000 worker) \
     && mkdir /work /artifacts && chown 1000:1000 /work /artifacts
 COPY proxy/ /opt/proxy/
