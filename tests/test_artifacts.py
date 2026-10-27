@@ -17,7 +17,8 @@ def finalized(root, run_id='run-one', passed=True, mode='diagnostic', success=No
     (run / 'captures/session.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in rows))
     atomic_json(run / 'captures/session.status.json', {'complete': True, 'bytes': 2})
     result = {'runId': run_id, 'diagnosticPassed': passed, 'taskSuccess': success,
-              'datasetEligible': passed and mode == 'collection' and success is True, 'capture': {'complete': True}, 'serverHealth': {'valid': True, 'samples': 12, 'meanTps': 20}}
+              'datasetEligible': passed and mode == 'collection' and success is True, 'capture': {'complete': True}, 'serverHealth': {'valid': True, 'samples': 12, 'meanTps': 20},
+              'clientHealth': {'valid': True, 'samples': 12, 'meanTps': 20}}
     atomic_json(run / 'metadata.json', {'runId': run_id, 'assignment': '@get oak_log 1', 'mode': mode,
                 'versions': {'minecraft': '1.21.1'}, 'build': {'source': 'test'}, 'world': {'seed': 1}})
     atomic_json(run / 'result.json', result)
@@ -254,3 +255,23 @@ class WorkerSchemaTests(unittest.TestCase):
             report = quality_report(run)
             self.assertFalse(report['eligible'])
             self.assertIn('watchdog_classification', report['reasons'])
+
+
+class IndependentTickGateTests(unittest.TestCase):
+    def test_worker_approval_cannot_override_invalid_client_or_server_measurements(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = finalized(root, mode='collection', success=True)
+            original = json.loads((run / 'result.json').read_text())
+            for field, health, reason in [
+                ('clientHealth', {'valid': True, 'samples': 12, 'meanTps': 10}, 'client_capacity_unvalidated'),
+                ('serverHealth', {'valid': True, 'samples': 9, 'meanTps': 20}, 'server_capacity_unvalidated'),
+                ('serverHealth', {'valid': True, 'samples': 12, 'meanTps': 20, 'degradedWindows': 1}, 'server_capacity_unvalidated'),
+                ('clientHealth', None, 'client_capacity_unvalidated'),
+            ]:
+                result = {**original, field: health}
+                atomic_json(run / 'result.json', result)
+                atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+                report = quality_report(run)
+                self.assertFalse(report['eligible'])
+                self.assertIn(reason, report['reasons'])

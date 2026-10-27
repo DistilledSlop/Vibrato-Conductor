@@ -52,11 +52,14 @@ def quality_report(root: Path) -> dict:
     try: capture_valid = capture_integrity(root)
     except (OSError, ValueError, TypeError, KeyError): capture_valid = False
     if result.get('capture', {}).get('complete') is not True or not capture_valid: reasons.append('capture_incomplete')
-    health = result.get('serverHealth') or {}
-    mean = health.get('meanTps')
-    if (health.get('valid') is not True or health.get('samples', 0) < 10
-            or not isinstance(mean, (int, float)) or not math.isfinite(mean) or mean < 18):
-        reasons.append('server_capacity_unvalidated')
+    def healthy_ticks(health):
+        if not isinstance(health, dict): return False
+        samples, mean = health.get('samples'), health.get('meanTps')
+        return (health.get('valid') is True and isinstance(samples, int) and samples >= 10
+                and isinstance(mean, (float, int)) and math.isfinite(mean) and mean >= 18
+                and health.get('degradedWindows', 0) == 0)
+    if not healthy_ticks(result.get('serverHealth')): reasons.append('server_capacity_unvalidated')
+    if not healthy_ticks(result.get('clientHealth')): reasons.append('client_capacity_unvalidated')
     if result.get('qualityInvalid'): reasons.extend(str(r) for r in result['qualityInvalid'])
     watchdog = result.get('watchdog')
     if watchdog:
