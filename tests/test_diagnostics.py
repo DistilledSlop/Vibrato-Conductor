@@ -53,17 +53,24 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(assessment['reason'], 'movement_loop_without_progress')
 
     def test_real_task_restart_counts_need_no_semantic_progress(self):
-        starts=[{'seconds': 15, 'taskClass':'MineTask','task':'<Mine ore> retry'}]*8
+        starts=[{'seconds': 15, 'taskClass':'MoveItemToSlotFromInventoryTask','task':'<Moving planks to slot 4> retry'}]*8
         dog=Watchdog()
         dog.observe(client(),None,{},0)
-        result=dog.observe(client(seconds=15,recentTaskStarts=starts),None,{},15)
+        result=dog.observe(client(seconds=15,recentTaskStarts=starts,leafClass='MoveItemToSlotFromInventoryTask',leaf='<Moving planks to slot 4>'),None,{},15)
         self.assertEqual(result['reason'],'repeated_task_restart')
         dog=Watchdog()
         dog.observe(client(),None,{},0)
         self.assertIsNone(dog.observe(client(seconds=15,recentTaskStarts=starts,leafClass='OtherTask'),None,{},15))
         dog=Watchdog()
         dog.observe(client(),None,{},0)
-        self.assertIsNone(dog.observe(client(seconds=15,recentTaskStarts=starts,inventory={'minecraft:coal':1}),None,{},15))
+        self.assertIsNone(dog.observe(client(seconds=15,recentTaskStarts=starts,inventory={'minecraft:coal':1},leafClass='MoveItemToSlotFromInventoryTask',leaf='<Moving planks to slot 4>'),None,{},15))
+
+    def test_moving_entity_navigation_churn_is_not_fast_failure(self):
+        dog=Watchdog()
+        for second in range(40):
+            starts=[{'seconds':second,'taskClass':'GetToEntityTask','task':'<Approach pig>'}]*9
+            self.assertIsNone(dog.observe(client(seconds=second,recentTaskStarts=starts,
+                leafClass='GetToEntityTask',leaf='<Approach pig>',position=[second,64,0]),None,{},second))
 
     def test_overload_precedes_behavior_classification(self):
         dog=Watchdog(stall_seconds=5)

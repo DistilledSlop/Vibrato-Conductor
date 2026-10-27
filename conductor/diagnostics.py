@@ -124,7 +124,10 @@ class Watchdog:
                   and s.get('taskClass') == client.get('leafClass')
                   and str(s.get('task')).split('>')[0] == str(client.get('leaf')).split('>')[0]]
         target_counts = Counter((s.get('taskClass'), str(s.get('task')).split('>')[0]) for s in starts)
-        if no_progress >= 10 and target_counts and max(target_counts.values()) >= 8:
+        leaf_class = str(client.get('leafClass') or '')
+        fast_restart_supported = leaf_class == 'MoveItemToSlotFromInventoryTask' or leaf_class.startswith('CraftGeneric')
+        # Chase/navigation children legitimately restart when their target moves; lifecycle churn alone is not a loop.
+        if fast_restart_supported and no_progress >= 10 and target_counts and max(target_counts.values()) >= 8:
             target, count = target_counts.most_common(1)[0]
             return self.assessment('repeated_task_restart', 'behavior', 'inferred',
                                    taskClass=target[0], task=target[1], starts=count, windowSeconds=10,
