@@ -161,7 +161,9 @@ The proxy terminates login on each leg rather than acting as a transparent byte 
 
 This sequence is an implementation starting point, not a completed architecture decision or a claim that any runtime component is already working.
 
-## Current environment and handoff
+## Original environment and handoff (historical)
+
+Implementation resumed after this handoff. See [the README](../README.md) and [worker operation](worker.md) for the current implementation and validation status. The following records the original inspection only.
 
 Only initial source inspection and temporary write-access checks were performed. No conductor runtime, deployment manifests, dashboard, integration patches, or source cleanup have been implemented. No sibling source files were changed. These requirements and the README are the first files created here.
 
