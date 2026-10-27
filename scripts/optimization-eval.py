@@ -225,6 +225,8 @@ def summarize_run(path, monitor=None):
         'perf': metadata.get('perf'), 'minecraft': versions.get('minecraft'), 'loader': versions.get('loader'),
         'fabricApi': versions.get('fabricApi'), 'clientMod': versions.get('clientMod'), 'serverTelemetry': versions.get('serverTelemetry'),
         'workerSource': metadata.get('build', {}).get('inputs', {}).get('conductor/worker.py'),
+        'softwareInputs': metadata.get('build', {}).get('inputs'),
+        'renderEnvironment': metadata.get('renderEnvironment'), 'serverProperties': metadata.get('serverProperties'),
         'runSeconds': metadata.get('runSeconds')}
     if monitoring: context['runtimeLimits'] = monitoring[0].get('runtimeLimits')
     metrics = {'serverMeanTps': result.get('serverHealth', {}).get('meanTps'),
@@ -269,13 +271,18 @@ def comparison_report(baselines, candidates, manifest_path=DEFAULT_MANIFEST):
         limits = candidate['context'].get('runtimeLimits') or {}
         limits_proven = all(isinstance(limits.get(key), (int, float)) and math.isfinite(limits[key])
                             and limits[key] > 0 for key in ('cpuCores', 'memoryBytes'))
-        evidence = bool(healthy and not mismatches and limits_proven and candidate['optimizationMods'])
+        expected_exclusions = {'diagnostic_mode', 'worker_excluded', 'experimental_optimization_profile_unvalidated'}
+        quality_valid = bool(base and all(isinstance(run.get('quality'), dict)
+            and not (set(run['quality'].get('reasons', ['quality_report_missing'])) - expected_exclusions)
+            for run in [base, candidate]))
+        evidence = bool(healthy and quality_valid and not mismatches and limits_proven and candidate['optimizationMods'])
         scenario = candidate['context']['scenario']
         matrix[scenario].append(evidence)
         pairs.append({'baseline': base['runId'] if base else None, 'candidate': candidate['runId'],
                       'sameStartingConditionsAndSoftware': bool(base and not mismatches),
                       'contextMismatches': mismatches, 'authoritativeOutcomesBothSucceeded': healthy,
                       'matchedRuntimeLimitsProven': bool(base and not mismatches and limits_proven),
+                      'evidenceQualityValid': quality_valid,
                       'metrics': delta, 'observationDifferences': differences,
                       'requiresBehaviorReview': True, 'evidenceReadyForScenarioReview': evidence})
     required = manifest['requiredBehaviorScenarios']

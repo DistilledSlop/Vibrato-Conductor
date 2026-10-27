@@ -65,7 +65,8 @@ class OptimizationTests(unittest.TestCase):
         context = {'scenario':'survival_resource','assignment':'@get dirt 1'}
         run = {'runId':'baseline','context':context,'metrics':{'serverMeanTps':20,'wholeWorkerCpuSeconds':100},
                'observations':{'items':['minecraft:dirt']},'diagnosticPassed':True,'taskSuccess':True,
-               'serverHealth':{'valid':True},'clientHealth':{'valid':True},'optimizationMods':[]}
+               'serverHealth':{'valid':True},'clientHealth':{'valid':True},'optimizationMods':[],
+               'quality':{'reasons':[]}}
         candidate = {**run,'runId':'candidate','optimizationMods':[{'modId':'ferritecore'}],
                      'metrics':{'serverMeanTps':20,'wholeWorkerCpuSeconds':50}}
         report = optimization.comparison_report([run],[candidate])
@@ -81,6 +82,10 @@ class OptimizationTests(unittest.TestCase):
         self.assertTrue(report['comparisons'][0]['evidenceReadyForScenarioReview'])
         asymmetric = optimization.comparison_report([run],[{**candidate,'context':limited}])
         self.assertIn('runtimeLimits', asymmetric['comparisons'][0]['contextMismatches'])
+        invalid = {**candidate,'context':limited,'quality':{'reasons':['watchdog_classification']}}
+        report = optimization.comparison_report([{**run,'context':limited}],[invalid])
+        self.assertFalse(report['comparisons'][0]['evidenceReadyForScenarioReview'])
+        self.assertFalse(report['comparisons'][0]['evidenceQualityValid'])
 
 
 if __name__ == '__main__': unittest.main()
