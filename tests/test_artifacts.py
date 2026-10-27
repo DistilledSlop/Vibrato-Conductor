@@ -234,3 +234,23 @@ class DeliveryPerformanceTests(unittest.TestCase):
             job = store.enqueue(run.name)
             with patch('conductor.artifacts.verify_manifest', side_effect=AssertionError('Payloads should not be rehashed')):
                 self.assertEqual(store.enqueue(run.name)['manifest_sha'], job['manifest_sha'])
+
+
+class WorkerSchemaTests(unittest.TestCase):
+    def test_healthy_null_watchdog_is_accepted_but_direct_assessments_are_excluded(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = finalized(root, mode='collection', success=True)
+            result = json.loads((run / 'result.json').read_text())
+            result['watchdog'] = None
+            result['clientHealth'] = {'samples': 12, 'meanTps': 20, 'valid': True}
+            atomic_json(run / 'result.json', result)
+            atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            self.assertTrue(quality_report(run)['eligible'])
+            result['watchdog'] = {'reason': 'repeated_task_loop', 'kind': 'behavior',
+                                  'confidence': 'inferred', 'evidence': {'restarts': 12}}
+            atomic_json(run / 'result.json', result)
+            atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            report = quality_report(run)
+            self.assertFalse(report['eligible'])
+            self.assertIn('watchdog_classification', report['reasons'])

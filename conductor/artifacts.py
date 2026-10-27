@@ -52,13 +52,15 @@ def quality_report(root: Path) -> dict:
     try: capture_valid = capture_integrity(root)
     except (OSError, ValueError, TypeError, KeyError): capture_valid = False
     if result.get('capture', {}).get('complete') is not True or not capture_valid: reasons.append('capture_incomplete')
-    health = result.get('serverHealth', {})
+    health = result.get('serverHealth') or {}
     mean = health.get('meanTps')
     if (health.get('valid') is not True or health.get('samples', 0) < 10
             or not isinstance(mean, (int, float)) or not math.isfinite(mean) or mean < 18):
         reasons.append('server_capacity_unvalidated')
     if result.get('qualityInvalid'): reasons.extend(str(r) for r in result['qualityInvalid'])
-    if result.get('watchdog', {}).get('classification'):
+    watchdog = result.get('watchdog')
+    if watchdog:
+        # Worker assessments use direct reason/kind/confidence/evidence; healthy workers explicitly emit null.
         reasons.append('watchdog_classification')
     versions = metadata.get('versions', {})
     if versions.get('minecraft') != '1.21.1' or not metadata.get('build'):
