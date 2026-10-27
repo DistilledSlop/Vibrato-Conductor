@@ -40,7 +40,7 @@ class FleetConfig:
     image: str = 'vibrato-worker:dev'
     desired: int = 0
     max_workers: int = 1
-    cpus: float = 4
+    cpus: float = 8
     memory_mb: int = 6144
     storage_mb: int = 8192
     cpu_budget: float = 0

@@ -6,7 +6,7 @@ Workers are independent Pods with `restartPolicy: Never`. The conductor alone re
 
 ## Docker
 
-Copy `fleet.docker.example.json` to a local configuration and set acceptance flags only after accepting the Minecraft EULA and isolated offline identities. The initial desired count is zero. Start the controller with the `serve` command and adjust the count through its authenticated dashboard/API. Increase `max_workers` and resource budgets only during deliberate capacity testing; the example ceiling is one.
+Copy `fleet.docker.example.json` to a local configuration and set acceptance flags only after accepting the Minecraft EULA and isolated offline identities. The initial desired count is zero. Start the controller with the `serve` command and adjust the count through its authenticated dashboard/API. The initial resource profile is 8 CPUs and 6 GiB per complete worker, with a ceiling of one. A 4-CPU worker passed isolated smoke tests but failed client tick health during concurrent rendering workloads; it is not a robust fleet default. The 8-CPU profile remains a measured candidate until concurrency validation establishes sustainable capacity. Increase `max_workers` and budgets only during deliberate capacity testing; no FPS, view distance, game rules, or visual detail reductions are silently applied.
 
 The Docker daemon runs worker containers on the daemon host. Bind mount paths in configuration must exist on that host. If the controller runs in a container, mount its state and artifact paths at identical absolute paths inside it and on the daemon host. Access to the Docker socket gives the controller authority over the host; only trusted operators should control its API or configuration.
 
