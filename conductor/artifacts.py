@@ -49,7 +49,9 @@ def quality_report(root: Path) -> dict:
     if result.get('diagnosticPassed') is not True: reasons.append('diagnostic_failed')
     if result.get('taskSuccess') is not True: reasons.append('task_success_unconfirmed')
     if result.get('datasetEligible') is not True: reasons.append('worker_excluded')
-    if result.get('capture', {}).get('complete') is not True or not capture_integrity(root): reasons.append('capture_incomplete')
+    try: capture_valid = capture_integrity(root)
+    except (OSError, ValueError, TypeError, KeyError): capture_valid = False
+    if result.get('capture', {}).get('complete') is not True or not capture_valid: reasons.append('capture_incomplete')
     health = result.get('serverHealth', {})
     mean = health.get('meanTps')
     if (health.get('valid') is not True or health.get('samples', 0) < 10
@@ -75,7 +77,8 @@ class ArtifactStore:
     then records a receipt in SQLite. Retries survive restarts; failed partial copies never become visible runs.
     """
     def __init__(self, local_root: Path, central_root: Path, state_dir: Path | None = None,
-                 max_buffer_bytes: int = 64 * 1024**3, retry_seconds: float = 5):
+                 max_buffer_bytes: int = 64 * 1024**3, retry_seconds: float = 5,
+                 max_central_bytes: int = 1024**4, usage_cache_seconds: float = 2):
         self.local_root = Path(local_root).resolve()
         self.central_root = Path(central_root).resolve()
         self.state_dir = Path(state_dir or self.local_root.parent / 'delivery-state').resolve()
@@ -85,7 +88,12 @@ class ArtifactStore:
         (self.central_root / '.incoming').mkdir(exist_ok=True)
         self.max_buffer_bytes = int(max_buffer_bytes)
         self.retry_seconds = float(retry_seconds)
-        if self.max_buffer_bytes < 1 or not math.isfinite(self.retry_seconds) or self.retry_seconds < 0:
+        self.max_central_bytes = int(max_central_bytes)
+        self.usage_cache_seconds = float(usage_cache_seconds)
+        self._usage_at, self._usage_value = 0, None
+        if (self.max_buffer_bytes < 1 or self.max_central_bytes < 1
+                or not math.isfinite(self.usage_cache_seconds) or self.usage_cache_seconds < 0
+                or not math.isfinite(self.retry_seconds) or self.retry_seconds < 0):
             raise ValueError('Invalid artifact buffering/retry settings')
         self.lock = threading.RLock()
         self.db_path = self.state_dir / 'delivery.sqlite'
@@ -106,10 +114,55 @@ class ArtifactStore:
             with db: yield db
         finally: db.close()
 
+    def quarantine_orphan(self, run_id: str, reason: str, *, terminal: bool = False, metadata: dict | None = None) -> dict:
+        """Finalize evidence after a confirmed terminal runtime death, never while a worker may still write.
+
+        The caller must establish backend terminal/absent state. This records infrastructure loss, not inferred bot
+        failure. Original malformed/incomplete files remain available as forensic artifacts.
+        """
+        if not terminal: raise ValueError('Orphan quarantine requires confirmed terminal runtime state')
+        if not IDENTIFIER.fullmatch(run_id): raise ValueError('Invalid run id')
+        root = self.local_root / run_id
+        if not root.is_dir() or root.is_symlink(): raise ValueError('No safe orphan artifact directory')
+        with self.lock:
+            if (root / 'manifest.json').exists():
+                return verify_manifest(root)
+            metadata_path = root / 'metadata.json'
+            recovered = dict(metadata or {})
+            if metadata_path.exists():
+                try:
+                    original = json.loads(metadata_path.read_text())
+                    if isinstance(original, dict): recovered = {**recovered, **original}
+                    else: raise ValueError('Metadata was not an object')
+                except (OSError, ValueError):
+                    backup = root / 'metadata.interrupted.json'
+                    if backup.exists(): raise ValueError('Interrupted metadata backup already exists')
+                    metadata_path.replace(backup)
+                    recovered['metadataRecovery'] = 'Original bytes retained in metadata.interrupted.json'
+            recovered.update({'runId': run_id, 'mode': 'diagnostic', 'quarantined': True})
+            atomic_json(metadata_path, recovered)
+            result_path = root / 'result.json'
+            if result_path.exists():
+                backup = root / 'result.interrupted.json'
+                if backup.exists(): raise ValueError('Interrupted result backup already exists')
+                result_path.replace(backup)
+            result = {'schemaVersion': 1, 'runId': run_id, 'reason': str(reason), 'diagnosticPassed': False,
+                      'taskSuccess': None, 'datasetEligible': False, 'quarantined': True,
+                      'classification': 'confirmed_runtime_termination',
+                      'capture': {'complete': False, 'bytes': sum(p.stat().st_size for p in (root / 'captures').glob('*.bin') if not p.is_symlink())},
+                      'serverHealth': {'valid': False, 'samples': 0, 'meanTps': None},
+                      'qualityInvalid': ['runtime_terminated_before_finalization'], 'finalizedWall': time.time()}
+            atomic_json(result_path, result)
+            from .storage import artifact_manifest
+            atomic_json(root / 'manifest.json', artifact_manifest(root, result))
+            self._usage_at = 0
+            return result
+
     def enqueue(self, run_id: str) -> dict:
         if not IDENTIFIER.fullmatch(run_id): raise ValueError('Invalid run id')
         source = self.local_root / run_id
-        verify_manifest(source)
+        result = verify_manifest(source)
+        if result.get('runId') != run_id: raise ValueError('Artifact result does not match run directory identity')
         quality = quality_report(source)
         manifest = json.loads((source / 'manifest.json').read_text())
         size = sum(row['bytes'] for row in manifest['files']) + (source / 'manifest.json').stat().st_size
@@ -170,6 +223,11 @@ class ArtifactStore:
                     if digest(target / 'manifest.json') != job['manifest_sha']:
                         raise ValueError('Central run conflicts with queued identity')
                 else:
+                    usage = self._usage(force=True)
+                    if usage['centralBytes'] + job['bytes'] > self.max_central_bytes:
+                        raise OSError('Central artifact byte limit reached')
+                    if shutil.disk_usage(self.central_root).free < job['bytes']:
+                        raise OSError('Central artifact filesystem has insufficient free space')
                     self._copy(source, stage)
                     verify_manifest(stage)
                     if digest(stage / 'manifest.json') != job['manifest_sha']:
@@ -194,16 +252,38 @@ class ArtifactStore:
                 outcomes.append({'runId': run_id, 'state': failure_state, 'error': str(error)})
             finally:
                 if stage.exists(): shutil.rmtree(stage)
+                self._usage_at = 0
         return outcomes
+
+    def _usage(self, force=False) -> dict:
+        with self.lock:
+            now = time.monotonic()
+            if not force and self._usage_value is not None and now - self._usage_at < self.usage_cache_seconds:
+                return self._usage_value
+            def size(root):
+                total = 0
+                for path in root.rglob('*'):
+                    try:
+                        if path.is_file() and not path.is_symlink(): total += path.stat().st_size
+                    except FileNotFoundError: pass  # atomic replacements and live files can disappear during sampling
+                return total
+            spool = size(self.local_root)
+            central = spool if self.local_root == self.central_root else size(self.central_root)
+            self._usage_value = {'liveSpoolBytes': spool, 'centralBytes': central}
+            self._usage_at = now
+            return self._usage_value
 
     def snapshot(self) -> dict:
         with self.lock, self._db() as db:
             rows = [dict(r) for r in db.execute('SELECT * FROM deliveries ORDER BY queued_at DESC')]
         for row in rows: row['quality'] = json.loads(row['quality'])
-        pending_bytes = sum(r['bytes'] for r in rows if r['state'] != 'delivered')
-        return {'backend': 'filesystem', 'centralRoot': str(self.central_root), 'runs': rows,
+        pending_bytes = sum(r['bytes'] for r in rows if r['state'] not in ('delivered', 'expired'))
+        usage = self._usage()
+        return {'backend': 'filesystem', 'centralRoot': str(self.central_root), 'runs': rows, **usage,
                 'pendingBytes': pending_bytes, 'maxBufferBytes': self.max_buffer_bytes,
-                'backpressure': pending_bytes >= self.max_buffer_bytes,
+                'maxCentralBytes': self.max_central_bytes,
+                'backpressure': max(pending_bytes, usage['liveSpoolBytes']) >= self.max_buffer_bytes
+                    or usage['centralBytes'] + (pending_bytes if self.local_root != self.central_root else 0) >= self.max_central_bytes,
                 'delivered': sum(r['state'] == 'delivered' for r in rows),
                 'eligible': sum(r['state'] == 'delivered' and r['quality']['eligible'] for r in rows)}
 
@@ -211,7 +291,8 @@ class ArtifactStore:
               now: float | None = None, dry_run: bool = True) -> list[str]:
         """Prune only delivered local spools; central evidence is retained independently."""
         if self.local_root == self.central_root: return []
-        if successful_days < 0 or failure_days < successful_days:
+        if (not math.isfinite(successful_days) or not math.isfinite(failure_days)
+                or successful_days < 0 or failure_days < successful_days):
             raise ValueError('Failures must be retained at least as long as successful diagnostics')
         active = set(active_run_ids)
         now = time.time() if now is None else now
@@ -229,5 +310,46 @@ class ArtifactStore:
             if source.is_symlink() or source.parent != self.local_root:
                 raise ValueError('Unsafe retention path')
             candidates.append(run_id)
-            if not dry_run: shutil.rmtree(source)
+            if not dry_run:
+                shutil.rmtree(source)
+                self._usage_at = 0
         return candidates
+
+
+    def prune_central(self, active_run_ids=(), diagnostic_days: float = 30, failure_days: float = 90,
+                      now: float | None = None, dry_run: bool = True) -> list[str]:
+        """Expire delivered diagnostic evidence after explicit retention periods; training data is protected.
+
+        This is a permanent diagnostic retention policy, distinct from local spool cleanup. Unknown, active,
+        undelivered, or corrupted runs are never deleted. Eligible training entries are never removed here.
+        """
+        if (not math.isfinite(diagnostic_days) or not math.isfinite(failure_days)
+                or diagnostic_days < 0 or failure_days < diagnostic_days):
+            raise ValueError('Failures must be retained at least as long as ordinary diagnostics')
+        active = set(active_run_ids)
+        now = time.time() if now is None else now
+        removed = []
+        for row in self.snapshot()['runs']:
+            run_id = row['run_id']
+            if run_id in active or row['state'] != 'delivered' or row['quality']['eligible']: continue
+            passed = row['quality']['diagnosticPassed'] and row['quality']['taskSuccess'] is not False
+            days = diagnostic_days if passed else failure_days
+            if now - row['delivered_at'] < days * 86400: continue
+            target, source = self.central_root / run_id, self.local_root / run_id
+            if not target.exists(): continue
+            verify_manifest(target)
+            if digest(target / 'manifest.json') != row['manifest_sha']:
+                raise ValueError('Refusing retention cleanup of corrupted central evidence')
+            # If another still-pending copy exists it must be byte-identical, not an in-progress replacement.
+            if source != target and source.exists():
+                verify_manifest(source)
+                if digest(source / 'manifest.json') != row['manifest_sha']:
+                    raise ValueError('Refusing retention cleanup with changed local evidence')
+            removed.append(run_id)
+            if not dry_run:
+                shutil.rmtree(target)
+                if source != target and source.exists(): shutil.rmtree(source)
+                with self.lock, self._db() as db:
+                    db.execute("UPDATE deliveries SET state='expired',error=NULL WHERE run_id=?", (run_id,))
+                self._usage_at = 0
+        return removed

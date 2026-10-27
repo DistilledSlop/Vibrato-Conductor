@@ -104,3 +104,76 @@ class ArtifactTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class ArtifactPolicyTests(unittest.TestCase):
+    def test_live_unfinalized_spool_counts_towards_backpressure(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            live = root / 'local/live/captures'
+            live.mkdir(parents=True)
+            (live / 'open.bin').write_bytes(b'x' * 1024)
+            store = ArtifactStore(root / 'local', root / 'central', root / 'state', max_buffer_bytes=512)
+            value = store.snapshot()
+            self.assertEqual(value['pendingBytes'], 0)
+            self.assertEqual(value['liveSpoolBytes'], 1024)
+            self.assertTrue(value['backpressure'])
+            with patch.object(Path, 'rglob', side_effect=AssertionError('usage should be cached')):
+                self.assertEqual(store.snapshot()['liveSpoolBytes'], 1024)
+
+    def test_central_retention_preserves_training_active_pending_failures_and_corruption(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            store = ArtifactStore(root / 'local', root / 'central', root / 'state')
+            for name, passed, mode, success in [('diagnostic', True, 'diagnostic', None),
+                                              ('active', True, 'diagnostic', None),
+                                              ('training', True, 'collection', True),
+                                              ('failure', False, 'diagnostic', False)]:
+                finalized(root / 'local', name, passed, mode, success)
+                store.enqueue(name)
+            finalized(root / 'local', 'pending')
+            store.deliver_pending(limit=10)
+            future = time.time() + 40 * 86400
+            self.assertEqual(store.prune_central(['active'], now=future), ['diagnostic'])
+            store.prune_central(['active'], now=future, dry_run=False)
+            self.assertFalse((root / 'central/diagnostic').exists())
+            self.assertFalse((root / 'local/diagnostic').exists())
+            for name in ['active', 'training', 'failure']: self.assertTrue((root / 'central' / name).exists())
+            self.assertTrue((root / 'local/pending').exists())
+            (root / 'central/failure/result.json').write_text('{}')
+            with self.assertRaises(ValueError): store.prune_central(['active'], now=time.time()+100*86400, dry_run=False)
+            self.assertTrue((root / 'central/failure').exists())
+            self.assertEqual(store.snapshot()['pendingBytes'], 0)
+
+    def test_central_quota_keeps_copy_unpublished_and_applies_backpressure(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = finalized(root / 'local')
+            store = ArtifactStore(root / 'local', root / 'central', root / 'state', max_central_bytes=1, retry_seconds=0)
+            store.enqueue(run.name)
+            value = store.deliver_pending(limit=1)
+            self.assertEqual(value[0]['state'], 'retry')
+            self.assertFalse((root / 'central' / run.name).exists())
+            self.assertTrue(store.snapshot()['backpressure'])
+
+
+class OrphanTests(unittest.TestCase):
+    def test_terminal_kill_evidence_is_preserved_delivered_and_never_promoted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            store = ArtifactStore(root / 'local', root / 'central', root / 'state')
+            orphan = root / 'local/killed-run'
+            (orphan / 'captures').mkdir(parents=True)
+            (orphan / 'captures/raw.bin').write_bytes(b'partial-packet')
+            (orphan / 'captures/raw.jsonl').write_text('{partial')
+            (orphan / 'captures/raw.status.json').write_text('{broken')
+            (orphan / 'metadata.json').write_text('{interrupted')
+            with self.assertRaisesRegex(ValueError, 'terminal'): store.quarantine_orphan('killed-run', 'runtime_killed')
+            self.assertFalse((orphan / 'manifest.json').exists())
+            result = store.quarantine_orphan('killed-run', 'runtime_killed', terminal=True)
+            self.assertFalse(result['datasetEligible'])
+            self.assertEqual((orphan / 'metadata.interrupted.json').read_text(), '{interrupted')
+            self.assertEqual((orphan / 'captures/raw.bin').read_bytes(), b'partial-packet')
+            store.enqueue('killed-run')
+            self.assertEqual(store.deliver_pending()[0]['state'], 'delivered')
+            self.assertEqual(store.snapshot()['eligible'], 0)
