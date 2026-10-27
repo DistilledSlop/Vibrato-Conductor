@@ -89,12 +89,18 @@ class CoverageInventory:
                  'unsupportedReason': None if supported else 'Recorder does not preserve this protocol phase completely'})
         registries = json.loads((self.catalog_path / 'registries-1.21.1.json').read_text())
         obtainable = set((self.catalog_path / 'obtainable-items.txt').read_text().splitlines())
+        entity_types = {e['name']: e.get('type') for e in registries.get('entities', [])}
+        mapped_items = {target for task in self.tasks for target in task.get('targets', [])}
         for kind, key, rule in [('item', 'items', 'inventory_present'), ('block', 'blocks', 'crosshair_target'), ('mob', 'mobs', 'loaded_nearby')]:
             for name in registries[key]:
-                supported = kind != 'item' or name in obtainable
+                supported = kind != 'item' or name in obtainable or 'item:minecraft:' + name in mapped_items
+                reason = None if supported else 'No exact matching resource name or task mapping in the existing obtainable-item catalogue'
+                if kind == 'mob' and entity_types.get(name) in ('other', 'projectile', 'player', 'living'):
+                    supported = False
+                    reason = 'Registry category contains a non-MobEntity; current nearby-mob instrumentation cannot observe it'
                 add(kind + ':minecraft:' + name, kind, name, supported, rule,
                     {'registryId': 'minecraft:' + name, 'facet': rule,
-                     'unsupportedReason': None if supported else 'No exact matching resource name in the existing obtainable-item catalogue'})
+                     'unsupportedReason': reason})
                 # Requested interactions stay separate from mere presence/visibility. No current heartbeat field
                 # proves these actions, so they remain explicit unsupported gaps rather than receiving proxy credit.
                 facets = {
