@@ -42,3 +42,36 @@ class StorageTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class IntegrityTests(unittest.TestCase):
+    def test_world_revision_covers_chunks_and_rejects_copy_mutations(self):
+        from conductor.storage import world_revision
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'bank/test/world'
+            source.mkdir(parents=True)
+            (source / 'level.dat').write_bytes(b'level')
+            (source / 'region').mkdir()
+            (source / 'region/r.0.0.mca').write_bytes(b'chunk-a')
+            original = world_revision(source)['revision']
+            (source / 'region/r.0.0.mca').write_bytes(b'chunk-b')
+            self.assertNotEqual(original, world_revision(source)['revision'])
+            with patch('conductor.storage.subprocess.run', return_value=subprocess.CompletedProcess([], 0)):
+                with self.assertRaises(ValueError): stage_world(root / 'bank', 'test', root / 'dest')
+
+    def test_manifest_rejects_traversal_extra_files_and_symlinks(self):
+        from conductor.storage import verify_manifest
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'data.bin').write_bytes(b'valid')
+            atomic_json(root / 'manifest.json', artifact_manifest(root, {'ok': True}))
+            self.assertEqual(verify_manifest(root), {'ok': True})
+            (root / 'extra').write_bytes(b'unlisted')
+            with self.assertRaisesRegex(ValueError, 'Unlisted'): verify_manifest(root)
+            (root / 'extra').unlink()
+            (root / 'link').symlink_to('/etc/passwd')
+            with self.assertRaisesRegex(ValueError, 'regular files'): verify_manifest(root)
+            (root / 'link').unlink()
+            atomic_json(root / 'manifest.json', {'schemaVersion': 1, 'result': {}, 'files': [{'path': '../outside', 'bytes': 0, 'sha256': ''}]})
+            with self.assertRaisesRegex(ValueError, 'Unsafe'): verify_manifest(root)
