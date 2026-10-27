@@ -93,7 +93,22 @@ class CoverageInventory:
             for name in registries[key]:
                 supported = kind != 'item' or name in obtainable
                 add(kind + ':minecraft:' + name, kind, name, supported, rule,
-                    {'unsupportedReason': None if supported else 'No exact matching resource name in the existing obtainable-item catalogue'})
+                    {'registryId': 'minecraft:' + name, 'facet': rule,
+                     'unsupportedReason': None if supported else 'No exact matching resource name in the existing obtainable-item catalogue'})
+                # Requested interactions stay separate from mere presence/visibility. No current heartbeat field
+                # proves these actions, so they remain explicit unsupported gaps rather than receiving proxy credit.
+                facets = {
+                    'item': [('item-acquire', 'server_confirmed_item_acquisition'),
+                             ('item-use', 'server_confirmed_item_use'),
+                             ('item-inventory-interact', 'server_confirmed_inventory_interaction_with_item')],
+                    'block': [('block-interact', 'server_confirmed_block_interaction'),
+                              ('block-statechange', 'server_confirmed_block_state_change')],
+                    'mob': [('mob-interact', 'server_confirmed_mob_interaction')],
+                }[kind]
+                for prefix, evidence_rule in facets:
+                    add(prefix + ':minecraft:' + name, kind, name + ' / ' + prefix.split('-', 1)[1], False,
+                        evidence_rule, {'registryId': 'minecraft:' + name, 'facet': prefix,
+                                        'unsupportedReason': 'Requires authoritative action-specific event instrumentation; presence or inventory delta is insufficient'})
         for task in self.tasks:
             add('task:' + task['id'], 'task', task.get('description', task['id']), task['supported'],
                 'authoritative_root_task_success_not_dispatch_or_elapsed_budget',

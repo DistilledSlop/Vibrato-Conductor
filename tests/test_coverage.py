@@ -127,3 +127,25 @@ class FailureSchedulingTests(unittest.TestCase):
             state = inventory.snapshot()['taskHealth'][0]
             self.assertEqual(state['consecutive_failures'], 0)
             self.assertEqual(state['failures'], 2)
+
+
+class InteractionGapTests(unittest.TestCase):
+    def test_presence_never_credits_requested_acquisition_use_or_interaction_facets(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            inventory = CoverageInventory(root / 'coverage.sqlite')
+            run = capture_run(root / 'runs', success=True, include_script=True,
+                observations={'items': ['minecraft:oak_log'], 'blocks': ['minecraft:stone'], 'mobs': ['minecraft:zombie']},
+                semantics={'items': 'inventory_present', 'blocks': 'crosshair_target', 'mobs': 'loaded_nearby'})
+            inventory.ingest(run)
+            targets = {row['id']: row for row in inventory.snapshot()['targets']}
+            for identity in ['item-acquire:minecraft:oak_log', 'item-use:minecraft:oak_log',
+                             'item-inventory-interact:minecraft:oak_log', 'block-interact:minecraft:stone',
+                             'block-statechange:minecraft:stone', 'mob-interact:minecraft:zombie']:
+                self.assertIn(identity, targets)
+                self.assertFalse(targets[identity]['supported'])
+                self.assertEqual(targets[identity]['observedRuns'], 0)
+                self.assertEqual(targets[identity]['successfulRuns'], 0)
+            self.assertEqual(targets['item:minecraft:oak_log']['observedRuns'], 1)
+            self.assertEqual(targets['block:minecraft:stone']['observedRuns'], 1)
+            self.assertEqual(targets['mob:minecraft:zombie']['observedRuns'], 1)
