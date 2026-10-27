@@ -14,6 +14,20 @@ spec.loader.exec_module(optimization)
 
 
 class OptimizationTests(unittest.TestCase):
+    def test_sampler_binds_single_run_worker_identity_and_actual_limits(self):
+        inspect = [{'Id':'container-proof','Config':{'Labels':{'dev.vibrato.conductor.worker':'true'},
+                    'Env':['RUN_ID=single-run']},'HostConfig':{'NanoCpus':8_000_000_000,'Memory':6*1024**3}}]
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / 'monitor.jsonl'
+            with patch.object(optimization.subprocess, 'check_output', side_effect=[json.dumps(inspect), 'PID RSS COMMAND\n1 10 python3\n2 20 java\n']), \
+                 patch.object(optimization.time, 'monotonic', side_effect=[0,0,2]), \
+                 patch.object(optimization.time, 'sleep'):
+                optimization.sample_container('owned', output, duration=1)
+            sample = json.loads(output.read_text())
+            self.assertEqual(sample['runId'], 'single-run')
+            self.assertEqual(sample['runtimeLimits'], {'cpuCores':8,'memoryBytes':6*1024**3})
+            self.assertEqual(sample['aggregateProcessRssBytes'],30*1024)
+
     def test_derivative_finalizer_writes_real_json_and_exact_mod_provenance(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

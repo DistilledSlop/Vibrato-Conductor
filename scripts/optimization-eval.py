@@ -302,6 +302,12 @@ def sample_container(container, output, duration=180, interval=2):
     info = json.loads(subprocess.check_output(['docker', 'inspect', container], text=True))[0]
     if info.get('Config', {}).get('Labels', {}).get('dev.vibrato.conductor.worker') != 'true':
         raise ValueError('RSS sampling is restricted to owned conductor workers')
+    run_id = info['Config']['Labels'].get('dev.vibrato.conductor.run')
+    if not run_id:
+        # The single-run CLI predates fleet labels; its worker RUN_ID is still explicit.
+        run_id = next((value.partition('=')[2] for value in info['Config'].get('Env', [])
+                       if value.startswith('RUN_ID=')), None)
+    if not run_id: raise ValueError('Owned worker has no explicit run identity')
     runtime_limits = {'cpuCores': info['HostConfig'].get('NanoCpus', 0) / 1e9,
                       'memoryBytes': info['HostConfig'].get('Memory', 0)}
     output = Path(output)
@@ -318,7 +324,7 @@ def sample_container(container, output, duration=180, interval=2):
                 if len(fields) == 3 and fields[0].isdigit() and fields[1].isdigit():
                     processes.append({'pid': int(fields[0]), 'rssBytes': int(fields[1]) * 1024, 'command': fields[2]})
             stream.write(json.dumps({'wall': time.time(), 'containerId': info['Id'],
-                'runId': info['Config']['Labels'].get('dev.vibrato.conductor.run'), 'runtimeLimits': runtime_limits,
+                'runId': run_id, 'runtimeLimits': runtime_limits,
                 'aggregateProcessRssBytes': sum(p['rssBytes'] for p in processes), 'processes': processes}) + '\n')
             stream.flush()
             time.sleep(interval)
