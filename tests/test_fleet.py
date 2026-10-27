@@ -326,6 +326,26 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(self.runtime.creates, [])
         self.assertTrue(any(e['kind'] == 'backoff_reset' for e in self.fleet.snapshot()['events']))
 
+    def test_persisted_scope_rejects_backend_and_storage_changes_but_allows_profiles(self):
+        for change in ({'backend': 'kubernetes'}, {'artifacts_dir': self.root / 'different-artifacts'},
+                       {'workspace_dir': self.root / 'different-workspaces'}):
+            config = FleetConfig.from_dict({**self.config.__dict__, **change})
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'runtime scope changed'):
+                Fleet(config, self.runtime, clock=self.clock)
+        config = FleetConfig.from_dict({**self.config.__dict__, 'image': 'different:tag', 'cpus': 4, 'seed': 99})
+        other = Fleet(config, self.runtime, clock=self.clock)
+        other.close()
+
+    def test_kubernetes_scope_records_namespace_context_and_known_cluster_endpoint(self):
+        state = self.root / 'kube-state'
+        base = {**self.config.__dict__, 'backend': 'kubernetes', 'state_dir': state,
+                'cluster_endpoint': 'https://example.invalid:6443', 'kube_context': 'test-cluster'}
+        first = Fleet(FleetConfig.from_dict(base), self.runtime, clock=self.clock)
+        first.close()
+        for change in ({'namespace': 'other'}, {'kube_context': 'another'}, {'cluster_endpoint': 'https://different.invalid:6443'}):
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'runtime scope changed'):
+                Fleet(FleetConfig.from_dict({**base, **change}), self.runtime, clock=self.clock)
+
     def test_configuration_rejects_unsafe_identity_and_bad_limits(self):
         for data in ({'fleet_id': '../bad'}, {'cpus': float('nan')}, {'desired': 2, 'max_workers': 1},
                      {'accept_eula': 'false'}, {'world_ids': ['../bad'], 'world_bank': '/bank'}):

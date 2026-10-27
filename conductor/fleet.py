@@ -8,10 +8,12 @@ import re
 import shutil
 import sqlite3
 import threading
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field, fields
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .backends import BackendError, DockerBackend, KubernetesBackend, worker_env
 from .storage import verify_manifest
@@ -73,6 +75,7 @@ class FleetConfig:
     kubectl: str = 'kubectl'
     kubeconfig: Path | None = None
     kube_context: str | None = None
+    cluster_endpoint: str | None = None
     artifacts_pvc: str = 'vibrato-artifacts'
     world_bank_pvc: str | None = None
 
@@ -128,6 +131,37 @@ class FleetConfig:
                     raise ValueError(f'Invalid Kubernetes {name}')
         return config
 
+    def runtime_scope(self):
+        scope = {'version': 1, 'backend': self.backend, 'artifactsRoot': str(self.artifacts_dir)}
+        if self.backend == 'docker':
+            scope['workspaceRoot'] = str(self.workspace_dir)
+            scope['dockerHost'] = os.environ.get('DOCKER_HOST')
+            scope['dockerContext'] = os.environ.get('DOCKER_CONTEXT')
+            return scope
+        endpoint = self.cluster_endpoint
+        host = os.environ.get('KUBERNETES_SERVICE_HOST')
+        if endpoint is None and host and self.kubeconfig is None and self.kube_context is None:
+            port = os.environ.get('KUBERNETES_SERVICE_PORT_HTTPS', os.environ.get('KUBERNETES_SERVICE_PORT', '443'))
+            endpoint = f'https://{host if ":" not in host else "[" + host + "]"}:{port}'
+        if endpoint is None:
+            argv = [self.kubectl]
+            if self.kubeconfig: argv += ['--kubeconfig', str(self.kubeconfig)]
+            if self.kube_context: argv += ['--context', self.kube_context]
+            # JSONPath prints only the server URL; never extract credentials or certificate data.
+            argv += ['config', 'view', '--minify', '-o', 'jsonpath={.clusters[0].cluster.server}']
+            try:
+                result = subprocess.run(argv, capture_output=True, text=True, timeout=10)
+                if result.returncode == 0: endpoint = result.stdout.strip() or None
+            except (OSError, subprocess.TimeoutExpired): pass
+        if endpoint is not None:
+            parsed = urlsplit(endpoint)
+            if parsed.scheme not in ('https', 'http') or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:
+                raise ValueError('Invalid Kubernetes cluster_endpoint')
+            endpoint = endpoint.rstrip('/')
+        scope.update(namespace=self.namespace, kubeContext=self.kube_context, clusterEndpoint=endpoint)
+        if endpoint is None: scope['kubeconfigSource'] = str(self.kubeconfig) if self.kubeconfig else None
+        return scope
+
     def public(self):
         return {name: (str(getattr(self, name)) if isinstance(getattr(self, name), Path) else getattr(self, name))
                 for name in ('fleet_id', 'backend', 'image', 'max_workers', 'cpus', 'memory_mb', 'storage_mb',
@@ -141,8 +175,6 @@ class Fleet:
         self.config = FleetConfig.from_dict({v.name: getattr(self.config, v.name) for v in fields(FleetConfig)})
         self.clock = clock
         self.config.state_dir.mkdir(parents=True, exist_ok=True)
-        self.config.artifacts_dir.mkdir(parents=True, exist_ok=True)
-        self.config.workspace_dir.mkdir(parents=True, exist_ok=True)
         self._thread_lock = threading.RLock()
         self._lock_file = (self.config.state_dir / 'reconciler.lock').open('a+')
         self.db = sqlite3.connect(self.config.state_dir / 'fleet.sqlite3', check_same_thread=False, timeout=30)
@@ -165,7 +197,23 @@ class Fleet:
             for key in ('last_start', 'next_start', 'consecutive_failures', 'circuit_until'):
                 self.db.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', (key, '0'))
             self.db.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', ('fleet_id', self.config.fleet_id))
-        if self._setting('fleet_id') != self.config.fleet_id: raise ValueError('State directory belongs to a different fleet')
+        if self._setting('fleet_id') != self.config.fleet_id:
+            self.db.close(); self._lock_file.close()
+            raise ValueError('State directory belongs to a different fleet')
+        scope = self.config.runtime_scope()
+        with self.db:
+            created_scope = self.db.execute('INSERT OR IGNORE INTO settings VALUES (?,?)',
+                ('runtime_scope', json.dumps(scope, sort_keys=True))).rowcount
+            if created_scope:
+                self._event('scope_bound', 'Bound state to backend and artifact storage identity; earlier legacy settings cannot be inferred')
+            prior_scope = self.db.execute("SELECT value FROM settings WHERE key='runtime_scope'").fetchone()[0]
+        old = json.loads(prior_scope)
+        if old != scope:
+            changed = ', '.join(sorted(k for k in set(old) | set(scope) if old.get(k) != scope.get(k)))
+            self.db.close(); self._lock_file.close()
+            raise ValueError('State runtime scope changed (' + changed + '); drain the old fleet and use a new state directory or an explicit migration')
+        self.config.artifacts_dir.mkdir(parents=True, exist_ok=True)
+        self.config.workspace_dir.mkdir(parents=True, exist_ok=True)
         self.backend = backend or (DockerBackend(self.config) if self.config.backend == 'docker' else KubernetesBackend(self.config))
         self.scheduler = scheduler
         self._paused_reason = None
