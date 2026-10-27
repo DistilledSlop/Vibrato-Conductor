@@ -44,4 +44,16 @@ Compare the same assignment, seed, immutable world revision, mode, permissions, 
 
 The report always leaves `behaviorEquivalent=false` and `behaviorValidation=unvalidated`. It lists missing required behavior scenarios, including physics, mob AI, redstone, containers, dimension changes, long progression tasks, and the explicit mode/permission curriculum. Those need scenario-specific authoritative evidence and review before a candidate can be promoted. Profiles are not automatically approved from a benchmark percentage.
 
-Current checkpoint: official artifacts and hashes were verified, staging and offline baseline analysis work, and focused tool tests pass. A FerriteCore derivative image was built and checked under its unprivileged runtime user: both mod copies match the pinned hashes, metadata is readable, and requesting collection still enters diagnostic mode. Candidate live performance/behavior validation is pending and no performance gain or equivalence is claimed.
+Current checkpoint: official artifacts and hashes were verified, staging and offline baseline analysis work, and focused tool tests pass. A FerriteCore derivative image was built and checked under its unprivileged runtime user: both mod copies match the pinned hashes, metadata is readable, and requesting collection still enters diagnostic mode.
+
+The bounded `ferritecore-dirt-01` smoke run loaded FerriteCore 7.0.3 on both client and server,
+completed the real Survival `@get dirt 1` task with dirt in inventory, and shut down cleanly.
+Measured limits were 8 CPU cores and 6 GiB; elapsed time was 53.45 seconds, whole-worker CPU
+consumption 256.50 core-seconds, reported cgroup memory peak 2,490,675,200 bytes, and sampled
+aggregate process RSS peak 2,532,921,344 bytes. RSS monitoring began after startup and sums shared
+pages across processes; it is not unique physical memory. This is a compatibility smoke test.
+Diagnostic scripts currently exit after task completion without the collection settling interval,
+so this fast task supplied zero post-warmup quality samples. Tick capacity, performance differences,
+and behavior equivalence remain unvalidated; the quality gate excludes the run from training.
+A valid later benchmark needs an explicit settling interval in diagnostic mode and matched
+baseline software, limits, task budget, and starting world. No optimization is enabled by default.
