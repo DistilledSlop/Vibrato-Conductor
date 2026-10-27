@@ -12,9 +12,12 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from collections import deque
+from statistics import mean
 from pathlib import Path
 
 from .storage import atomic_json, artifact_manifest, stage_world
+from .diagnostics import Watchdog, task_success
 
 
 def number(env: dict, key: str, default: float, minimum: float, maximum: float) -> float:
@@ -38,6 +41,13 @@ class Config:
     client_heap: str
     server_heap: str
     perf: str
+    mode: str = 'diagnostic'
+    stall_seconds: float = 600
+    loop_seconds: float = 90
+    pillar_seconds: float = 45
+    screenshots: bool = True
+    screenshot_seconds: int = 15
+    collection_settle_seconds: float = 20
 
     @classmethod
     def read(cls, env=None):
@@ -60,11 +70,19 @@ class Config:
         perf = env.get('PERF_MODE', 'normal')
         if perf not in ('normal', 'low'):
             raise ValueError('PERF_MODE must be normal or low')
+        mode = env.get('MODE', 'diagnostic')
+        if mode not in ('diagnostic', 'collection'): raise ValueError('MODE must be diagnostic or collection')
         return cls(run_id, seed, task, number(env, 'RUN_SECONDS', 300, 10, 86400),
                    number(env, 'STARTUP_SECONDS', 240, 10, 1800),
                    number(env, 'HEARTBEAT_SECONDS', 45, 5, 600),
                    int(number(env, 'MAX_LOCAL_BYTES', 4 * 1024**3, 1024**2, 1024**4)),
-                   world_id, env.get('ALLOW_WORLD_COPY') == 'true', *heaps, perf)
+                   world_id, env.get('ALLOW_WORLD_COPY') == 'true', *heaps, perf, mode,
+                   number(env, 'WATCHDOG_STALL_SECONDS', 600, 30, 86400),
+                   number(env, 'WATCHDOG_LOOP_SECONDS', 90, 30, 3600),
+                   number(env, 'WATCHDOG_PILLAR_SECONDS', 45, 15, 600),
+                   env.get('SCREENSHOTS', 'true') == 'true',
+                   int(number(env, 'SCREENSHOT_SECONDS', 15, 5, 300)),
+                   number(env, 'COLLECTION_SETTLE_SECONDS', 20, 0, 120))
 
 
 def capture_evidence(captures: Path) -> dict:
@@ -105,6 +123,7 @@ class Worker:
         self.config = config
         self.root = Path('/work') / config.run_id
         self.artifacts = Path('/artifacts') / config.run_id
+        self.health_path = Path('/work/health.json')
         self.children = {}
         self.stopping = False
         self.phase = 'starting'
@@ -113,6 +132,19 @@ class Worker:
         self.heartbeat_count = 0
         self.last_capture_bytes = 0
         self.capture_at = None
+        self.last_client = None
+        self.last_server = None
+        self._last_server_ticks = None
+        self._last_screenshot = None
+        self.server_measurements = deque(maxlen=86400)
+        self.client_measurements = deque(maxlen=86400)
+        self.server_rolling = deque(maxlen=10)
+        self.degraded_server_windows = 0
+        self.classification = None
+        self.resources = {}
+        self.watchdog = Watchdog(config.stall_seconds, config.loop_seconds, config.pillar_seconds)
+        self.finalized = False
+        self.lifetime_deadline = self.started + config.startup_seconds * 3 + config.seconds + 90
 
     def stop_requested(self, *_): self.stopping = True
 
@@ -129,17 +161,103 @@ class Worker:
             if code is not None: raise RuntimeError(f'{name}_exited:{code}')
         if self.stopping: raise RuntimeError('operator_stop')
 
+    @staticmethod
+    def read_json(path):
+        try: return json.loads(path.read_text())
+        except (OSError, ValueError): return None
+
+    def sample_server(self):
+        data = self.read_json(self.root / 'server-heartbeat.json')
+        if not data or data.get('ticks') == self._last_server_ticks: return
+        self.last_server = data
+        self._last_server_ticks = data.get('ticks')
+        if self.artifacts.exists():
+            with (self.artifacts / 'server-heartbeats.jsonl').open('a') as stream:
+                stream.write(json.dumps(data) + '\n')
+            atomic_json(self.artifacts / 'server-heartbeat.json', data)
+        if self.last_heartbeat is not None and isinstance(data.get('tps'), (int, float)):
+            self.server_measurements.append(data['tps'])
+            self.server_rolling.append(data['tps'])
+            if len(self.server_rolling) == 10 and mean(self.server_rolling) < 18:
+                self.degraded_server_windows += 1
+
+    def sample_resources(self):
+        root = Path('/sys/fs/cgroup')
+        def read(name):
+            try: return (root / name).read_text().strip()
+            except OSError: return None
+        def stat(name):
+            value = read(name)
+            try: return {line.split()[0]: int(line.split()[1]) for line in value.splitlines()}
+            except (TypeError, ValueError, AttributeError, IndexError): return {}
+        def pressure(name):
+            raw = read(name)
+            if not raw: return None
+            try: return float(raw.splitlines()[0].split('avg10=')[1].split()[0])
+            except (IndexError, ValueError): return None
+        usage, limit = read('memory.current'), read('memory.max')
+        memory = int(usage) if usage and usage.isdigit() else None
+        maximum = int(limit) if limit and limit.isdigit() else None
+        cpu, events = stat('cpu.stat'), stat('memory.events')
+        memory_psi, cpu_psi = pressure('memory.pressure'), pressure('cpu.pressure')
+        self.resources = {
+            'memoryBytes': memory, 'memoryLimitBytes': maximum,
+            'cpuUsageSeconds': cpu.get('usage_usec', 0) / 1e6,
+            'cpuThrottledSeconds': cpu.get('throttled_usec', 0) / 1e6,
+            'cpuThrottledPeriods': cpu.get('nr_throttled', 0),
+            'oomKills': events.get('oom_kill', 0),
+            'memoryPressure': bool((memory is not None and maximum and memory / maximum >= .92)
+                                   or (memory_psi is not None and memory_psi > 5)),
+            'cpuPressure': bool(cpu_psi is not None and cpu_psi > 10),
+            'memoryPressureAvg10': memory_psi, 'cpuPressureAvg10': cpu_psi,
+        }
+        return self.resources
+
     def health(self):
-        atomic_json(Path('/work/health.json'), {
-            'runId': self.config.run_id, 'phase': self.phase, 'wall': time.time(),
+        if self.finalized: return
+        self.sample_server()
+        self.sample_resources()
+        server_age = None if not self.last_server else max(0, time.time() - self.last_server.get('wall', 0))
+        health = {
+            'runId': self.config.run_id, 'phase': self.phase, 'wall': time.time(), 'mode': self.config.mode,
             'heartbeatAge': None if self.last_heartbeat is None else time.monotonic() - self.last_heartbeat,
             'captureAge': None if self.capture_at is None else time.monotonic() - self.capture_at,
-        })
+            'serverHeartbeatAge': server_age,
+            'clientTps': None if not self.last_client else self.last_client.get('tps'),
+            'serverTps': None if not self.last_server else self.last_server.get('tps'),
+            'meanTickMs': None if not self.last_server else self.last_server.get('meanTickMs'),
+            'serverMspt': None if not self.last_server else self.last_server.get('meanTickMs'),
+            'maxTickMs': None if not self.last_server else self.last_server.get('maxTickMs'),
+            'captureBytes': self.last_capture_bytes, 'resources': self.resources,
+            'classification': self.classification,
+            'screenshotWall': None if self._last_screenshot is None else self._last_screenshot.get('wall'),
+            'screenshotAge': None if self._last_screenshot is None else max(0, time.time()-self._last_screenshot.get('wall', 0)),
+        }
+        atomic_json(self.health_path, health)
+        if self.artifacts.exists(): atomic_json(self.artifacts / 'health.json', health)
+
+    def copy_screenshot(self, client):
+        ready = self.read_json(client / 'screenshot-ready.json')
+        filename = None if not ready else ready.get('file')
+        if filename not in ('live-0.png', 'live-1.png'): return
+        image = client / 'screenshots' / filename
+        if not ready or ready == self._last_screenshot or not image.is_file(): return
+        self._last_screenshot = ready
+        temp = self.artifacts / 'screenshot.png.tmp'
+        shutil.copyfile(image, temp)
+        temp.replace(self.artifacts / 'screenshot.png')
+
+    def storage_bytes(self):
+        # Allocated bytes account for sparse files; no traversal through immutable library/mod links.
+        return sum(p.stat().st_blocks * 512 for root in (self.root, self.artifacts)
+                   for p in root.rglob('*') if p.is_file() and not p.is_symlink())
 
     def wait_for(self, test, name):
         deadline = time.monotonic() + self.config.startup_seconds
         while time.monotonic() < deadline:
             self.check_children()
+            if time.monotonic() > self.lifetime_deadline: raise RuntimeError('lifetime_limit')
+            if self.storage_bytes() > self.config.max_bytes: raise RuntimeError('local_storage_limit')
             self.health()
             if test(): return
             time.sleep(1)
@@ -153,6 +271,7 @@ class Worker:
             (self.artifacts / name).mkdir()
         server, client = self.root / 'server', self.root / 'client'
         server.mkdir(); client.mkdir()
+        self.health()
         for name in ['libraries', 'versions', 'mods']:
             source = Path('/opt/server') / name
             if source.exists():
@@ -181,10 +300,11 @@ class Worker:
         if self.config.task == 'director':
             script.write_text(f'{self.config.seconds} exit\n')
         else:
-            script.write_text(f'0 @stop\n1 {self.config.task}\n0 wait-idle {self.config.seconds}\n0 exit\n')
+            settle = self.config.collection_settle_seconds if self.config.mode == 'collection' else 0
+            script.write_text(f'0 @stop\n1 {self.config.task}\n0 wait-idle {self.config.seconds}\n{settle} exit\n')
         metadata = {
             'schemaVersion': 1, 'runId': self.config.run_id, 'seed': self.config.seed,
-            'assignment': self.config.task, 'runSeconds': self.config.seconds, 'mode': 'diagnostic',
+            'assignment': self.config.task, 'runSeconds': self.config.seconds, 'mode': self.config.mode,
             'world': world, 'perf': self.config.perf, 'connection': 'client -> 127.0.0.1:25566 -> 127.0.0.1:25565',
             'versions': json.loads(Path('/opt/game/versions.json').read_text()),
             'build': json.loads(Path('/opt/build-info.json').read_text()),
@@ -197,6 +317,7 @@ class Worker:
         self.spawn('display', ['Xvfb', ':99', '-screen', '0', '1280x720x24', '-nolisten', 'tcp'], self.root)
         self.wait_for(lambda: Path('/tmp/.X11-unix/X99').exists(), 'display')
         self.spawn('server', ['java', '-Xms512M', '-Xmx' + self.config.server_heap,
+                             '-Dvibrato.telemetry.path=' + str(self.root / 'server-heartbeat.json'),
                              '-jar', 'fabric-server-launch.jar', 'nogui'], server, stdin=subprocess.PIPE)
         server_log = self.artifacts / 'logs/server.log'
         self.wait_for(lambda: 'Done (' in server_log.read_text(errors='replace'), 'server')
@@ -219,7 +340,9 @@ class Worker:
         natives.mkdir()
         options['nativesDirectory'] = str(natives)
         options['jvmArguments'] += [f'-Dvibrato.seed={self.config.seed}', f'-Dvibrato.perf={self.config.perf}',
-                                    f'-Dvibrato.script={script}', '-Dvibrato.campaignTelemetry=true']
+                                    f'-Dvibrato.script={script}', '-Dvibrato.campaignTelemetry=true',
+                                    '-Dvibrato.screenshots=' + str(self.config.screenshots).lower(),
+                                    '-Dvibrato.screenshotIntervalSeconds=' + str(self.config.screenshot_seconds)]
         argv = mll.command.get_minecraft_command(metadata['versions']['profile'], '/opt/game/minecraft', options)
         self.spawn('client', argv, client)
 
@@ -227,7 +350,7 @@ class Worker:
         previous_mtime = None
         joined_at = None
         launched = time.monotonic()
-        deadline = launched + self.config.startup_seconds + self.config.seconds + 30
+        deadline = launched + self.config.startup_seconds + self.config.seconds + self.config.collection_settle_seconds + 30
         while time.monotonic() < deadline:
             self.check_children(['display', 'server', 'proxy'])
             now = time.monotonic()
@@ -240,6 +363,8 @@ class Worker:
                         stream.write(json.dumps({'wall': time.time(), **data}) + '\n')
                     atomic_json(self.artifacts / 'heartbeat.json', data)
                     previous_mtime = stat.st_mtime_ns
+                    self.last_client = data
+                    if isinstance(data.get('tps'), (int, float)): self.client_measurements.append(data['tps'])
                     self.last_heartbeat = now
                     self.heartbeat_count += 1
                     joined_at = joined_at or now
@@ -248,19 +373,28 @@ class Worker:
             if size > self.last_capture_bytes:
                 self.last_capture_bytes, self.capture_at = size, now
             self.health()
-            resources = {'wall': time.time(), 'captureBytes': size}
+            self.copy_screenshot(client)
+            resources = {'wall': time.time(), 'captureBytes': size, **self.resources}
             for name in ['memory.current', 'memory.peak', 'cpu.stat', 'memory.events']:
                 path = Path('/sys/fs/cgroup') / name
                 resources[name] = path.read_text().strip() if path.exists() else None
             with (self.artifacts / 'resources.jsonl').open('a') as stream:
                 stream.write(json.dumps(resources) + '\n')
-            local_bytes = sum(p.stat().st_size for root in (self.root, self.artifacts)
-                              for p in root.rglob('*') if p.is_file() and not p.is_symlink())
+            local_bytes = self.storage_bytes()
             if local_bytes > self.config.max_bytes: return 'local_storage_limit'
+            if now > self.lifetime_deadline: return 'lifetime_limit'
             if self.children['client'].poll() is not None:
                 return 'client_finished' if self.children['client'].returncode == 0 else 'client_crashed'
             if joined_at is None and now - launched > self.config.startup_seconds: return 'client_join_timeout'
             if self.last_heartbeat and now - self.last_heartbeat > self.config.heartbeat_seconds: return 'heartbeat_timeout'
+            if joined_at and (not self.last_server or time.time() - self.last_server.get('wall', 0) > self.config.heartbeat_seconds):
+                return 'server_heartbeat_timeout'
+            assessment = self.watchdog.observe(self.last_client, self.last_server, self.resources, now)
+            if assessment:
+                self.classification = assessment
+                self.phase = 'unhealthy'
+                self.health()
+                return assessment['reason']
             if joined_at and (self.capture_at is None or now - self.capture_at > self.config.heartbeat_seconds): return 'capture_stalled'
             time.sleep(2)
         return 'lifetime_limit'
@@ -300,12 +434,17 @@ class Worker:
             reason = self.observe(client)
         except Exception as error:
             reason = str(error)
+            self.sample_resources()
+            if self.resources.get('oomKills', 0):
+                self.classification = Watchdog.assessment('worker_memory_exhausted', 'overload', 'confirmed', **self.resources)
         finally:
             self.phase = 'stopping'
             self.shutdown()
         for name in ['script-result.json', 'campaign-heartbeat.json']:
             source = self.root / 'client' / name
             if source.exists(): shutil.copyfile(source, self.artifacts / name)
+        self.copy_screenshot(self.root / 'client')
+        self.sample_server()
         evidence = capture_evidence(self.artifacts / 'captures')
         script_result_path = self.artifacts / 'script-result.json'
         script_result = json.loads(script_result_path.read_text()) if script_result_path.exists() else {}
@@ -314,19 +453,40 @@ class Worker:
         ok = reason == 'client_finished' and script_ok and self.heartbeat_count >= 3 and evidence['complete']
         ok = ok and all(self.children.get(name) is not None and self.children[name].returncode == 0
                         for name in ['client', 'proxy', 'server'])
+        success = task_success(self.config.task, script_result)
+        if reason != 'client_finished' or not script_ok: success = False if self.config.task != 'director' else None
+        server_health = {
+            'samples': len(self.server_measurements),
+            'meanTps': mean(self.server_measurements) if self.server_measurements else None,
+            'degradedWindows': self.degraded_server_windows,
+        }
+        server_health['valid'] = (server_health['samples'] >= 10 and server_health['meanTps'] >= 18
+                                  and not self.degraded_server_windows)
+        client_health = {'samples': len(self.client_measurements),
+                         'meanTps': mean(self.client_measurements) if self.client_measurements else None}
+        client_health['valid'] = client_health['samples'] >= 10 and client_health['meanTps'] >= 18
+        invalid = []
+        if not client_health['valid']: invalid.append('client_tick_health_not_established')
+        if not server_health['valid']: invalid.append('server_tick_health_not_established')
+        if self.classification: invalid.append(self.classification['reason'])
+        if success is not True: invalid.append('task_success_not_confirmed')
+        if not ok: invalid.append('worker_diagnostic_failed')
+        eligible = self.config.mode == 'collection' and not invalid and evidence['complete']
         result = {
             'schemaVersion': 1, 'runId': self.config.run_id, 'reason': reason, 'diagnosticPassed': ok,
-            'datasetEligible': False, 'taskSuccess': None, 'heartbeatSamples': self.heartbeat_count,
+            'datasetEligible': eligible, 'taskSuccess': success, 'mode': self.config.mode,
+            'serverHealth': server_health, 'clientHealth': client_health, 'qualityInvalid': invalid, 'watchdog': self.classification, 'heartbeatSamples': self.heartbeat_count,
             'capture': evidence, 'elapsedSeconds': time.monotonic() - self.started,
             'exitCodes': {name: proc.returncode for name, proc in self.children.items()},
-            'limitations': ['Dedicated-server tick telemetry unavailable', 'No authoritative task progress watchdog yet',
-                            'Passing diagnostics proves the worker path, not task success or capacity'],
+            'limitations': ['Behavior loop/stall watchdog classifications are inferred unless the task reports failure',
+                            'Diagnostic pass alone does not establish task success or fleet capacity'],
         }
         if not self.artifacts.exists(): raise RuntimeError(reason)
         atomic_json(self.artifacts / 'result.json', result)
-        atomic_json(self.artifacts / 'manifest.json', artifact_manifest(self.artifacts, result))
         self.phase = 'completed' if ok else 'failed'
         self.health()
+        atomic_json(self.artifacts / 'manifest.json', artifact_manifest(self.artifacts, result))
+        self.finalized = True
         print(json.dumps(result), flush=True)
         return 0 if ok else 1
 
@@ -337,7 +497,8 @@ def main():
             health = json.loads(Path('/work/health.json').read_text())
             ok = (health['phase'] == 'running' and time.time() - health['wall'] < 30
                   and health['heartbeatAge'] is not None and health['heartbeatAge'] < 45
-                  and health['captureAge'] is not None and health['captureAge'] < 45)
+                  and health['captureAge'] is not None and health['captureAge'] < 45
+                  and health.get('serverHeartbeatAge') is not None and health['serverHeartbeatAge'] < 45)
             return 0 if ok else 1
         except (OSError, ValueError, KeyError): return 1
     worker = Worker(Config.read())

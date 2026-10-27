@@ -2,10 +2,13 @@ import json
 import subprocess
 import tempfile
 import sys
+import time
+from unittest.mock import patch
+from types import SimpleNamespace
 import unittest
 from pathlib import Path
 
-from conductor.storage import atomic_json
+from conductor.storage import atomic_json, artifact_manifest
 from conductor.worker import Config, Worker, capture_evidence
 
 
@@ -37,6 +40,47 @@ class WorkerTests(unittest.TestCase):
             base.with_suffix('.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
             self.assertFalse(capture_evidence(root)['complete'])
             self.assertFalse(capture_evidence(root / 'missing')['complete'])
+
+    def test_final_health_is_hashed_and_artifacts_freeze_at_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            worker = Worker(Config.read({'RUN_ID':'finalize'}))
+            worker.root = base / 'work'
+            worker.artifacts = base / 'artifacts'
+            worker.health_path = base / 'health.json'
+            def prepare():
+                worker.root.mkdir()
+                (worker.root / 'client').mkdir()
+                worker.artifacts.mkdir()
+                (worker.artifacts / 'captures').mkdir()
+                capture = worker.artifacts / 'captures/session'
+                capture.with_suffix('.bin').write_bytes(b'ab')
+                capture.with_suffix('.jsonl').write_text(json.dumps({'off':0,'len':1,'dir':'C2S','state':'play'})+'\n'+
+                    json.dumps({'off':1,'len':1,'dir':'S2C','state':'play'})+'\n')
+                atomic_json(capture.with_suffix('.status.json'), {'complete':True,'bytes':2})
+                atomic_json(worker.root / 'client/script-result.json', {'status':'exit','commands':[{'action':'exit','status':'exit'}]})
+                return worker.root/'client', worker.root/'server', None, {}
+            def observe(_):
+                worker.heartbeat_count=3
+                worker.last_heartbeat=time.monotonic()
+                worker.capture_at=time.monotonic()
+                worker.server_measurements.extend([20]*10)
+                worker.client_measurements.extend([20]*10)
+                return 'client_finished'
+            worker.prepare=prepare
+            worker.launch=lambda *_: None
+            worker.observe=observe
+            worker.shutdown=lambda: None
+            worker.sample_resources=lambda: {}
+            worker.children={name:SimpleNamespace(returncode=0) for name in ['client','proxy','server']}
+            with patch.dict('os.environ', {'ACCEPT_EULA':'true','ACCEPT_OFFLINE':'true'}):
+                self.assertEqual(worker.run(),0)
+            manifest=json.loads((worker.artifacts/'manifest.json').read_text())
+            self.assertEqual(json.loads((worker.artifacts/'health.json').read_text())['phase'],'completed')
+            self.assertIn('health.json',[record['path'] for record in manifest['files']])
+            self.assertEqual(artifact_manifest(worker.artifacts,manifest['result']),manifest)
+            worker.health()
+            self.assertEqual(artifact_manifest(worker.artifacts,manifest['result']),manifest)
 
     def test_server_receives_console_stop_before_signals(self):
         worker = Worker(Config.read({'RUN_ID': 'shutdown-test'}))

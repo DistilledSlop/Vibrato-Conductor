@@ -21,10 +21,12 @@ fleet.download(server_download['url'], server / 'server.jar', 'sha1', server_dow
 subprocess.run(['java', '-jar', 'installer.jar', 'server', '-mcversion', fleet.MC_VERSION,
                 '-loader', fleet.LOADER_VERSION], cwd=server, check=True, timeout=180)
 (server / 'mods').mkdir(exist_ok=True)
-for jar in Path('/opt/game/mods').glob('fabric-api-*.jar'):
+for jar in [*Path('/opt/game/mods').glob('fabric-api-*.jar'), *Path('/opt/vibrato/build/server-mods').glob('*.jar')]:
     shutil.copy2(jar, server / 'mods' / jar.name)
 Path('/opt/game/versions.json').write_text(json.dumps({
     'minecraft': fleet.MC_VERSION, 'loader': fleet.LOADER_VERSION,
     'fabricApi': fleet.FABRIC_API_VERSION, 'profile': fleet.FABRIC_PROFILE,
     'serverInstaller': '1.0.3', 'optimizationMods': [],
+    'serverTelemetry': [{'file': p.name, 'sha256': __import__('hashlib').sha256(p.read_bytes()).hexdigest()}
+                        for p in (server / 'mods').glob('vibrato-conductor-telemetry-*.jar')],
 }) + '\n')

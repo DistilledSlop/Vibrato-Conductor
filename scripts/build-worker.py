@@ -22,6 +22,10 @@ def main():
             if not p.name.endswith(('-sources.jar', '-dev.jar'))]
     if len(jars) != 1:
         parser.error('Build Vibrato first; build/libs must contain exactly one production jar')
+    telemetry_jars = [p for p in (args.vibrato / 'conductor-telemetry/build/libs').glob('vibrato-conductor-telemetry-*.jar')
+                      if not p.name.endswith(('-sources.jar', '-dev.jar'))]
+    if len(telemetry_jars) != 1:
+        parser.error('Build Vibrato including conductor-telemetry before building the worker')
     info = {}
     for name, repo in [('vibrato', args.vibrato), ('proxy', args.proxy), ('conductor', ROOT)]:
         info[name] = {
@@ -32,6 +36,7 @@ def main():
         'vibrato/gradle.properties': args.vibrato / 'gradle.properties',
         'vibrato/scripts/fleet/launch.py': args.vibrato / 'scripts/fleet/launch.py',
         f'vibrato/build/libs/{jars[0].name}': jars[0],
+        f'vibrato/build/server-mods/{telemetry_jars[0].name}': telemetry_jars[0],
         'Dockerfile': ROOT / 'worker/Dockerfile', 'install.py': ROOT / 'worker/install.py',
     }
     for name in ('index.js', 'recorder.js', 'sanitize.js', 'package.json', 'package-lock.json'):
