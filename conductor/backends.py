@@ -34,8 +34,9 @@ def worker_env(config, spec):
     if gamemode not in ('survival', 'creative', 'adventure', 'spectator'):
         raise ValueError('Assignment gamemode must be a known Minecraft mode')
     if not isinstance(operator, bool): raise ValueError('Assignment operator must be boolean')
-    if isinstance(operator_level, bool) or not isinstance(operator_level, int) or not 1 <= operator_level <= 4:
-        raise ValueError('Assignment operatorLevel must be an integer between 1 and 4')
+    minimum_level = 1 if operator else 0
+    if isinstance(operator_level, bool) or not isinstance(operator_level, int) or not minimum_level <= operator_level <= 4:
+        raise ValueError(f'Assignment operatorLevel must be an integer between {minimum_level} and 4')
     if scenario is not None and not re.fullmatch(r'[a-z][a-z0-9_-]{0,63}', scenario):
         raise ValueError('Assignment scenario must be a safe identifier')
     env = dict(config.worker_env)
