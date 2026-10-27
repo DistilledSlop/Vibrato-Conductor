@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "minecraftVersion": "1.21.1",
+  "loader": "fabric",
+  "checkedAt": "2026-10-27",
+  "policy": {
+    "defaultProfile": "baseline",
+    "experimentalCollectionAllowed": false,
+    "equivalenceRequiresReview": true,
+    "metricsAloneProveEquivalence": false
+  },
+  "requiredBehaviorScenarios": [
+    "survival_resource",
+    "creative_inventory",
+    "creative_build",
+    "adventure_inspect",
+    "spectator_explore",
+    "operator_commands",
+    "mob_ai",
+    "block_physics",
+    "redstone",
+    "containers",
+    "nether",
+    "gamer"
+  ],
+  "mods": {
+    "ferritecore": {
+      "project": "ferrite-core",
+      "modId": "ferritecore",
+      "version": "7.0.3",
+      "modrinthVersion": "7.0.3-fabric",
+      "projectId": "uXXizFIs",
+      "versionId": "sOzRw3CG",
+      "minecraftVersions": [
+        "1.21.1"
+      ],
+      "loader": "fabric",
+      "filename": "ferritecore-7.0.3-fabric.jar",
+      "url": "https://cdn.modrinth.com/data/uXXizFIs/versions/sOzRw3CG/ferritecore-7.0.3-fabric.jar",
+      "sha512": "3ad31620fac4ff44327dc7dedbe162b2d978f3f246dc16255a6e400ce9592a0d326fe36a626f3c1bf30a11f813093cbb4dcc107af039cff724d0cdf648541fdf",
+      "sha256": "98c3ab1d5aab8f14b5d082d3f1a467727fd335f02d124555c94339761c4c18f2",
+      "size": 123450,
+      "license": "MIT",
+      "dependencies": {
+        "fabricloader": ">=0.14.21",
+        "minecraft": ">=1.21.1 <1.22"
+      },
+      "source": "https://github.com/malte0811/FerriteCore",
+      "versionApi": "https://api.modrinth.com/v2/version/sOzRw3CG",
+      "versionPage": "https://modrinth.com/mod/ferrite-core/version/sOzRw3CG"
+    },
+    "lithium": {
+      "project": "lithium",
+      "modId": "lithium",
+      "version": "0.15.4+mc1.21.1",
+      "modrinthVersion": "mc1.21.1-0.15.4-fabric",
+      "projectId": "gvQqBUqZ",
+      "versionId": "N08Z8wog",
+      "minecraftVersions": [
+        "1.21.1"
+      ],
+      "loader": "fabric",
+      "filename": "lithium-fabric-0.15.4+mc1.21.1.jar",
+      "url": "https://cdn.modrinth.com/data/gvQqBUqZ/versions/N08Z8wog/lithium-fabric-0.15.4%2Bmc1.21.1.jar",
+      "sha512": "182064b00e6315e2255b857eaab8eb759e6b042ebd4cc8b855ff0d93f875a5a7188fac49f878d7b29d4ef7e6b6341190ad7f6f6f39f4a6d2c62003468b08e4c6",
+      "sha256": "92329d98c57f5a22091a0adb509fdb1d60113a5602c708b799b13134bad13baa",
+      "size": 797454,
+      "license": "LGPL-3.0-only",
+      "dependencies": {
+        "fabricloader": ">=0.15.1",
+        "minecraft": [
+          "1.21",
+          "1.21.1"
+        ]
+      },
+      "source": "https://github.com/CaffeineMC/lithium-fabric",
+      "versionApi": "https://api.modrinth.com/v2/version/N08Z8wog",
+      "versionPage": "https://modrinth.com/mod/lithium/version/N08Z8wog"
+    }
+  },
+  "profiles": {
+    "baseline": {
+      "mods": [],
+      "experimental": false,
+      "behaviorValidation": "baseline",
+      "default": true
+    },
+    "ferritecore": {
+      "mods": [
+        "ferritecore"
+      ],
+      "experimental": true,
+      "behaviorValidation": "unvalidated"
+    },
+    "lithium": {
+      "mods": [
+        "lithium"
+      ],
+      "experimental": true,
+      "behaviorValidation": "unvalidated"
+    },
+    "ferritecore-lithium": {
+      "mods": [
+        "ferritecore",
+        "lithium"
+      ],
+      "experimental": true,
+      "behaviorValidation": "unvalidated"
+    }
+  }
+}
