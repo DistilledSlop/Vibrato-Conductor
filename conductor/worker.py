@@ -156,6 +156,7 @@ class Worker:
         self._last_screenshot = None
         self.server_measurements = deque(maxlen=86400)
         self.client_measurements = deque(maxlen=86400)
+        self.client_rolling = deque(maxlen=10)
         self.server_rolling = deque(maxlen=10)
         self.degraded_server_windows = 0
         self.classification = None
@@ -247,6 +248,9 @@ class Worker:
             'serverHeartbeatAge': server_age,
             'clientTps': None if not self.last_client else self.last_client.get('tps'),
             'serverTps': None if not self.last_server else self.last_server.get('tps'),
+            'clientMeanTps': mean(self.client_rolling) if len(self.client_rolling) >= 10 else None,
+            'serverMeanTps': mean(self.server_rolling) if len(self.server_rolling) >= 10 else None,
+            'clientMeanTpsSamples': len(self.client_rolling), 'serverMeanTpsSamples': len(self.server_rolling),
             'meanTickMs': None if not self.last_server else self.last_server.get('meanTickMs'),
             'serverMspt': None if not self.last_server else self.last_server.get('meanTickMs'),
             'maxTickMs': None if not self.last_server else self.last_server.get('maxTickMs'),
@@ -315,7 +319,7 @@ class Worker:
             'server-ip': '127.0.0.1', 'server-port': '25565', 'online-mode': 'false',
             'enforce-secure-profile': 'false', 'level-name': 'world', 'level-seed': str(self.config.seed),
             'difficulty': 'normal', 'gamemode': self.config.gamemode, 'force-gamemode': 'true', 'motd': 'Vibrato diagnostic worker',
-            'max-players': '1', 'spawn-protection': '0',
+            'max-players': '1', 'spawn-protection': '0', 'op-permission-level': str(self.config.operator_level or 2),
         }
         if self.config.operator:
             atomic_json(server / 'ops.json', [{'uuid': self.player_uuid, 'name': self.username,
@@ -405,7 +409,9 @@ class Worker:
                     atomic_json(self.artifacts / 'heartbeat.json', data)
                     previous_mtime = stat.st_mtime_ns
                     self.last_client = data
-                    if self.measurement_ready(data) and isinstance(data.get('tps'), (int, float)): self.client_measurements.append(data['tps'])
+                    if self.measurement_ready(data) and isinstance(data.get('tps'), (int, float)):
+                        self.client_measurements.append(data['tps'])
+                        self.client_rolling.append(data['tps'])
                     self.last_heartbeat = now
                     self.heartbeat_count += 1
                     if data.get('worldReady'):

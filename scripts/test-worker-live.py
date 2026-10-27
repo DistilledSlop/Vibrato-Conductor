@@ -27,6 +27,9 @@ def main():
     parser.add_argument('--world-id',default='seed-424242')
     parser.add_argument('--cpus',type=float,default=4)
     parser.add_argument('--image',default='vibrato-worker:dev')
+    parser.add_argument('--gamemode',choices=['survival','creative','adventure','spectator'],default='survival')
+    parser.add_argument('--operator',action='store_true')
+    parser.add_argument('--operator-level',type=int,default=2)
     parser.add_argument('--accept-eula',action='store_true')
     parser.add_argument('--accept-offline',action='store_true')
     args=parser.parse_args()
@@ -38,12 +41,13 @@ def main():
         'world_bank':str(args.world_bank.resolve()),'allow_world_copy':True,
         'image':args.image,'cpus':args.cpus,'memory_mb':6144,'storage_mb':8192,
         'mode':args.mode,'seconds':args.seconds,'accept_eula':True,'accept_offline':True,
+        'worker_env':{'GAMEMODE':args.gamemode,'OPERATOR':str(args.operator).lower(),'OP_PERMISSION_LEVEL':str(args.operator_level),'REQUESTED_CPUS':str(args.cpus)},
     })
     artifacts=config.artifacts_dir/args.id
     workspace=config.workspace_dir/args.id
     if artifacts.exists() or workspace.exists(): parser.error('Use a fresh --id; existing evidence is never overwritten')
     backend=DockerBackend(config)
-    spec={'runId':args.id,'task':args.task,'seconds':args.seconds,'seed':424242,'worldId':args.world_id}
+    spec={'runId':args.id,'task':args.task,'seconds':args.seconds,'seed':424242,'worldId':args.world_id,'gamemode':args.gamemode,'operator':args.operator,'operatorLevel':args.operator_level if args.operator else 0}
     backend.create_worker(spec)
     print('Started '+backend.name(args.id),flush=True)
     print('Artifacts: '+str(artifacts),flush=True)
@@ -81,6 +85,13 @@ def main():
         assert result['diagnosticPassed'],json.dumps(result)
         assert result['serverHealth']['valid'] and result['serverHealth']['samples']>=10,json.dumps(result)
         assert result['clientHealth']['valid'] and result['clientHealth']['samples']>=10,json.dumps(result)
+    if result.get('assignmentContext'):
+        assert result['assignmentContext']['valid'],json.dumps(result)
+        assert result['assignmentContext']['gamemode']==args.gamemode,json.dumps(result)
+    if args.task.startswith('@conductor_scenario '):
+        scenario=json.loads((artifacts/'scenario-result.json').read_text())
+        assert scenario['status']=='completed' and scenario['evidence']['serverConfirmed'] is True,json.dumps(scenario)
+        assert scenario['evidence']['permissionLevel']==(args.operator_level if args.operator else 0),json.dumps(scenario)
     if args.expect=='eligible':
         assert result['taskSuccess'] is True,json.dumps(result)
         assert result['datasetEligible'] is True,json.dumps(result)
