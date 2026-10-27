@@ -104,6 +104,7 @@ class Test:
             'enabled_tasks': ['director'], 'catalog_dir': '/data/live-test-catalog', 'seconds': 45,
             'stagger_seconds': 3, 'reconcile_seconds': 2, 'failure_backoff_seconds': 3,
             'max_failure_backoff_seconds': 15, 'circuit_pause_seconds': 30,
+            'worker_env': {'LP_NUM_THREADS': '2'},
             'unhealthy_grace_seconds': 5, 'world_bank_pvc': 'vibrato-world-bank',
             'world_bank': '/world-bank', 'world_ids': ['seed-424242'], 'allow_world_copy': True})
         patch = {'data': {'fleet.json': json.dumps(config, indent=2)}}
