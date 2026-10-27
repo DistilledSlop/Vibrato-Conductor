@@ -78,6 +78,29 @@ class IntegrityTests(unittest.TestCase):
 
 
 class WorldCurriculumTests(unittest.TestCase):
+    def test_stage_preserves_source_seed_and_rejects_stale_sidecar_before_copy(self):
+        from conductor.storage import world_revision
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'bank/real/world'
+            source.mkdir(parents=True)
+            (source / 'level.dat').write_bytes(b'pregenerated')
+            metadata = {'seed': '-9211111111111111111', 'sourceGameType': 1,
+                        'minecraftVersion': '1.21.1', 'revision': world_revision(source)['revision']}
+            atomic_json(source.parent / 'world.json', metadata)
+            with patch('conductor.storage.subprocess.run', return_value=subprocess.CompletedProcess([], 1, '', 'unsupported')):
+                result = stage_world(root / 'bank', 'real', root / 'dest', True)
+            self.assertEqual(result['sourceSeed'], metadata['seed'])
+            self.assertEqual(result['sourceGameType'], 1)
+            self.assertEqual(result['minecraftVersion'], '1.21.1')
+            self.assertEqual(len(result['sourceMetadataSha256']), 64)
+            (source / 'level.dat').write_bytes(b'modified')
+            with patch('conductor.storage.subprocess.run') as copy:
+                with self.assertRaisesRegex(ValueError, 'World revision mismatch'):
+                    stage_world(root / 'bank', 'real', root / 'stale', True)
+                copy.assert_not_called()
+            self.assertFalse((root / 'stale').exists())
+
     def test_bank_mode_and_operator_restrictions_are_explicit_and_strict(self):
         from conductor.storage import inspect_world_bank
         with tempfile.TemporaryDirectory() as folder:

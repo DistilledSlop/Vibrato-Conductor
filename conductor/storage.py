@@ -96,6 +96,13 @@ def stage_world(bank: Path, world_id: str, dest: Path, allow_copy: bool = False)
     if source.parent.is_symlink(): raise ValueError('Symlinked bank world')
     if dest.exists() or dest.is_symlink(): raise ValueError('Mutable world destination already exists')
     before = world_revision(source)
+    metadata_path = source.parent / 'world.json'
+    if metadata_path.is_symlink(): raise ValueError('Symlinked world metadata')
+    metadata_bytes = metadata_path.read_bytes() if metadata_path.exists() else None
+    metadata = json.loads(metadata_bytes) if metadata_bytes is not None else {}
+    if not isinstance(metadata, dict): raise ValueError('World metadata must be an object')
+    if metadata.get('revision') and metadata['revision'] != before['revision']:
+        raise ValueError('World revision mismatch')
     result = subprocess.run(['cp', '-R', '--reflink=always', '--no-preserve=mode,ownership',
                              str(source), str(dest)], capture_output=True, text=True)
     mode = 'reflink'
@@ -110,13 +117,19 @@ def stage_world(bank: Path, world_id: str, dest: Path, allow_copy: bool = False)
     # Both sides are checked: a bank mutation or incomplete copy must not silently change starting conditions.
     after = world_revision(source)
     copied = world_revision(dest)
-    if before['revision'] != after['revision'] or copied['revision'] != before['revision']:
+    metadata_after = metadata_path.read_bytes() if metadata_path.exists() else None
+    if (before['revision'] != after['revision'] or copied['revision'] != before['revision']
+            or metadata_path.is_symlink() or metadata_after != metadata_bytes):
         shutil.rmtree(dest)
         raise RuntimeError('World bank changed during copying or mutable copy failed verification')
     (dest / 'session.lock').unlink(missing_ok=True)
     return {'id': world_id, 'mode': mode, 'logicalBytes': before['logicalBytes'],
             'levelDatSha256': digest(source / 'level.dat'), 'revision': before['revision'],
-            'fileCount': before['fileCount']}
+            'fileCount': before['fileCount'],
+            # Existing-world seeds are authoritative; runtime level-seed does not replace them.
+            'sourceSeed': metadata.get('seed'), 'sourceGameType': metadata.get('sourceGameType'),
+            'minecraftVersion': metadata.get('minecraftVersion'),
+            'sourceMetadataSha256': hashlib.sha256(metadata_bytes).hexdigest() if metadata_bytes is not None else None}
 
 
 def artifact_manifest(root: Path, result: dict) -> dict:
