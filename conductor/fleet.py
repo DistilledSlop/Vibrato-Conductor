@@ -33,6 +33,7 @@ class FleetConfig:
     backend: str = 'docker'
     state_dir: Path = Path('.state/fleet')
     artifacts_dir: Path = Path('.state/artifacts')
+    central_dir: Path | None = None
     workspace_dir: Path = Path('.state/workspaces')
     world_bank: Path | None = None
     world_ids: list[str] = field(default_factory=list)
@@ -78,13 +79,13 @@ class FleetConfig:
     @classmethod
     def from_dict(cls, value):
         aliases = {'fleetId': 'fleet_id', 'state': 'state_dir', 'artifacts': 'artifacts_dir',
-                   'worldBank': 'world_bank', 'target': 'desired', 'kubectl_path': 'kubectl',
+                   'worldBank': 'world_bank', 'centralDir': 'central_dir', 'target': 'desired', 'kubectl_path': 'kubectl',
                    'memory': 'memory_mb'}
         names = {v.name for v in fields(cls)}
         data = {aliases.get(key, key): val for key, val in dict(value).items()}
         unknown = set(data) - names
         if unknown: raise ValueError('Unknown fleet settings: ' + ', '.join(sorted(unknown)))
-        for name in ('state_dir', 'artifacts_dir', 'workspace_dir', 'world_bank', 'kubeconfig'):
+        for name in ('state_dir', 'artifacts_dir', 'central_dir', 'workspace_dir', 'world_bank', 'kubeconfig'):
             if data.get(name) is not None: data[name] = Path(data[name]).expanduser().resolve()
         config = cls(**data)
         for name in ('state_dir', 'artifacts_dir', 'workspace_dir'):
@@ -131,7 +132,7 @@ class FleetConfig:
         return {name: (str(getattr(self, name)) if isinstance(getattr(self, name), Path) else getattr(self, name))
                 for name in ('fleet_id', 'backend', 'image', 'max_workers', 'cpus', 'memory_mb', 'storage_mb',
                              'stagger_seconds', 'startup_timeout', 'health_timeout', 'seconds', 'mode', 'perf',
-                             'namespace', 'artifacts_dir', 'world_ids')}
+                             'namespace', 'artifacts_dir', 'central_dir', 'world_ids')}
 
 
 class Fleet:
@@ -295,12 +296,18 @@ class Fleet:
         return not health.get('classification')
 
     def _verify_result(self, row):
-        root = self.config.artifacts_dir / row['run_id']
-        try:
-            result = verify_manifest(root)
-            if result.get('runId') != row['run_id']: raise ValueError('Artifact run identity differs')
-            return result
-        except (OSError, ValueError, KeyError, TypeError): return None
+        roots = [self.config.artifacts_dir / row['run_id']]
+        if self.config.central_dir is not None:
+            roots.append(self.config.central_dir / row['run_id'])
+        # Terminal evidence may already have been safely delivered and pruned from the spool.
+        # Live telemetry continues to read only the worker's spool, never stale central files.
+        for root in roots:
+            try:
+                result = verify_manifest(root)
+                if result.get('runId') != row['run_id']: raise ValueError('Artifact run identity differs')
+                return result
+            except (OSError, ValueError, KeyError, TypeError): continue
+        return None
 
     def _record_failure(self, row, reason, now):
         if row['failure_counted']: return

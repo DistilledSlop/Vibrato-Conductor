@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -211,6 +212,21 @@ class FleetTests(unittest.TestCase):
         self.finalized(run_id)
         self.fleet.reconcile()
         self.assertEqual(self.runtime.removes, [run_id])
+
+    def test_delivered_central_evidence_survives_spool_retention_and_allows_cleanup(self):
+        self.fleet.config.central_dir = self.root / 'central'
+        self.fleet.config.central_dir.mkdir()
+        self.fleet.config.retained_workers = 0
+        self.fleet.set_target(1)
+        run_id = self.fleet.reconcile()['workers'][0]['runId']
+        self.finalized(run_id)
+        shutil.move(str(self.config.artifacts_dir / run_id), str(self.fleet.config.central_dir / run_id))
+        self.fleet.set_target(0)
+        result = self.fleet.reconcile()
+        self.assertEqual(result['workers'][0]['state'], 'completed')
+        self.assertTrue(result['workers'][0]['artifactsVerified'])
+        self.assertEqual(self.runtime.removes, [run_id])
+        self.assertTrue((self.fleet.config.central_dir / run_id / 'manifest.json').is_file())
 
     def test_second_process_cannot_reconcile_while_lease_held(self):
         other = Fleet(self.config, self.runtime, clock=self.clock)
