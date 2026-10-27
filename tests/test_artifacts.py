@@ -106,7 +106,6 @@ class ArtifactTests(unittest.TestCase):
             self.assertTrue(store.snapshot()['backpressure'])
 
 
-if __name__ == '__main__': unittest.main()
 
 
 class ArtifactPolicyTests(unittest.TestCase):
@@ -288,3 +287,39 @@ class QuarantineConfidenceTests(unittest.TestCase):
             self.assertEqual(result['confidence'], 'inferred')
             self.assertEqual(result['classification'], 'runtime_missing_after_quiescence')
             self.assertFalse(result['datasetEligible'])
+
+
+
+class CurriculumAdmissionTests(unittest.TestCase):
+    def test_mode_scenario_admission_requires_actual_context_and_server_outcome(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = finalized(root, mode='collection', success=True)
+            metadata = json.loads((run / 'metadata.json').read_text())
+            metadata.update({'assignedGamemode':'creative','operator':False,'operatorLevel':2,'scenario':'creative_inventory'})
+            atomic_json(run / 'metadata.json', metadata)
+            result = json.loads((run / 'result.json').read_text())
+            result['assignmentContext'] = {'valid':True}
+            atomic_json(run / 'result.json', result)
+            atomic_json(run / 'scenario-result.json', {'scenario':'creative_inventory','status':'completed',
+                'source':'client_actions_plus_server_observer','evidence':{'serverConfirmed':True}})
+            heartbeat = {'actualMode':'creative','permissionLevel':0,'permissionSource':'server_observer'}
+            (run / 'heartbeats.jsonl').write_text(json.dumps(heartbeat)+'\n')
+            atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            self.assertTrue(quality_report(run)['eligible'])
+            heartbeat['actualMode'] = 'survival'
+            (run / 'heartbeats.jsonl').write_text(json.dumps(heartbeat)+'\n')
+            atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            self.assertIn('assignment_context_unconfirmed_or_mismatched', quality_report(run)['reasons'])
+            heartbeat['actualMode']='creative';heartbeat['permissionLevel']=2
+            (run / 'heartbeats.jsonl').write_text(json.dumps(heartbeat)+'\n')
+            atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            self.assertFalse(quality_report(run)['eligible'])
+            heartbeat['permissionLevel']=0
+            (run / 'heartbeats.jsonl').write_text(json.dumps(heartbeat)+'\n')
+            atomic_json(run / 'scenario-result.json', {'scenario':'creative_inventory','status':'completed',
+                'source':'client_actions_only','evidence':{'serverConfirmed':True}})
+            atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            self.assertIn('scenario_server_outcome_unconfirmed', quality_report(run)['reasons'])
+
+if __name__ == '__main__': unittest.main()

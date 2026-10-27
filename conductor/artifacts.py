@@ -65,6 +65,41 @@ def quality_report(root: Path) -> dict:
     if watchdog:
         # Worker assessments use direct reason/kind/confidence/evidence; healthy workers explicitly emit null.
         reasons.append('watchdog_classification')
+    if 'assignedGamemode' in metadata:
+        expected_mode = metadata['assignedGamemode']
+        operator = metadata.get('operator')
+        declared_level = metadata.get('operatorLevel', metadata.get('operatorPermissionLevel', 2))
+        valid_definition = (expected_mode in ('survival', 'creative', 'adventure', 'spectator')
+            and isinstance(operator, bool) and isinstance(declared_level, int)
+            and not isinstance(declared_level, bool) and 1 <= declared_level <= 4)
+        expected_level = declared_level if operator is True else 0
+        context = result.get('assignmentContext') or {}
+        observed_context = False
+        mismatched_context = False
+        heartbeats = root / 'heartbeats.jsonl'
+        if heartbeats.exists():
+            with heartbeats.open() as lines:
+                for line in lines:
+                    try: heartbeat = json.loads(line)
+                    except ValueError: continue
+                    if not isinstance(heartbeat, dict) or heartbeat.get('permissionSource') != 'server_observer': continue
+                    actual_mode, actual_level = heartbeat.get('actualMode'), heartbeat.get('permissionLevel')
+                    if actual_mode not in ('survival', 'creative', 'adventure', 'spectator') or not isinstance(actual_level, int): continue
+                    if actual_mode == expected_mode and actual_level == expected_level: observed_context = True
+                    else: mismatched_context = True
+        if (not valid_definition or not isinstance(context, dict) or context.get('valid') is not True
+                or not observed_context or mismatched_context):
+            reasons.append('assignment_context_unconfirmed_or_mismatched')
+        scenario_id = metadata.get('scenario')
+        if scenario_id:
+            try:
+                scenario = json.loads((root / 'scenario-result.json').read_text())
+                scenario_evidence = scenario.get('evidence') or {}
+                confirmed = (scenario.get('scenario') == scenario_id and scenario.get('status') == 'completed'
+                    and scenario.get('source') == 'client_actions_plus_server_observer'
+                    and scenario_evidence.get('serverConfirmed') is True)
+            except (OSError, ValueError, AttributeError, TypeError): confirmed = False
+            if not confirmed: reasons.append('scenario_server_outcome_unconfirmed')
     versions = metadata.get('versions', {})
     if versions.get('minecraft') != '1.21.1' or not metadata.get('build'):
         reasons.append('software_identity_missing')
