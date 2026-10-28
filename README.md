@@ -84,4 +84,4 @@ python3 scripts/test-cluster.py up
 python3 scripts/test-cluster.py load --image vibrato-worker:dev --image vibrato-controller:dev
 ```
 
-Live test scripts create real game workers and retain their evidence under `.state/`; use a separate test fleet/configuration. Raw saves, credentials, captures, and local test state are excluded from Git. The original [single-worker validation](docs/validation-2026-10-27.md) is historical; later fleet/curriculum results are recorded separately.
+Live test scripts create real game workers and retain their evidence under `.state/`; use a separate test fleet/configuration. Raw saves, credentials, captures, and local test state are excluded from Git. The original [single-worker validation](docs/validation-2026-10-27.md) is historical; the [fleet validation report](docs/fleet-validation-2026-10-28.md) and [mode validation report](docs/mode-validation-2026-10-27.md) record the later results and limits.
