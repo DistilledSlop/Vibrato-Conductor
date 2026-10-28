@@ -15,6 +15,13 @@ CATALOGS = Path(__file__).resolve().parents[1] / 'catalogs'
 DIRECTIONS = {'C2S': 'serverbound', 'S2C': 'clientbound'}
 
 
+class NoEligibleTask(ValueError):
+    """An expected scheduling pause, optionally until a compatible task's cooldown expires."""
+    def __init__(self, message, retry_at=None):
+        super().__init__(message)
+        self.retry_at = retry_at
+
+
 def packet_id(stream, offset: int, length: int) -> int:
     stream.seek(offset)
     value = 0
@@ -184,10 +191,11 @@ class CoverageInventory:
             elif bank:
                 available = list(bank.values())
             elif self.world_bank:
-                raise ValueError('No valid world-bank entries are available')
+                raise NoEligibleTask('No valid world-bank entries are available')
             else:
                 available = [{'id': None, 'tags': [], 'supported': True}]
             eligible = []
+            cooldown_deadlines = []
             health = {r['task_id']: dict(r) for r in db.execute('SELECT * FROM task_health')}
             now = time.time()
             assigned = dict(db.execute('SELECT task_id,COUNT(*) FROM assignments GROUP BY task_id'))
@@ -195,19 +203,24 @@ class CoverageInventory:
             successes = dict(db.execute('SELECT target_id,COUNT(*) FROM successes GROUP BY target_id'))
             for task in self.tasks:
                 task_health = health.get(task['id'], {})
-                if task_health.get('cooldown_until', 0) > now: continue
                 if not task['supported'] or self.enabled_tasks is not None and task['id'] not in self.enabled_tasks: continue
                 for world in available:
                     if not world.get('supported', True) or world.get('minecraftVersion', '1.21.1') != '1.21.1': continue
                     if not set(task.get('requiresTags', [])).issubset(world.get('tags', [])): continue
                     if task['gamemode'] not in world.get('gamemodes', ['survival', 'creative', 'adventure', 'spectator']): continue
                     if task['operator'] and world.get('allowOperator', True) is not True: continue
+                    cooldown_until = task_health.get('cooldown_until', 0)
+                    if cooldown_until > now:
+                        cooldown_deadlines.append(cooldown_until)
+                        continue
                     targets = ['task:' + task['id'], self._context_id(task['id'], task['gamemode'], task['operator']), *task.get('targets', [])]
                     deficit = sum(1 / (1 + counts.get(t, 0) + 2 * successes.get(t, 0)) for t in targets) / len(targets)
                     score = deficit / ((1 + assigned.get(task['id'], 0)) * (1 + task_health.get('consecutive_failures', 0)))
                     tie = hashlib.sha256(f'{self.seed}:{run_id}:{task["id"]}:{world.get("id")}'.encode()).hexdigest()
                     eligible.append((score, tie, task, world, targets))
-            if not eligible: raise ValueError('No supported task matches the available worlds and scheduling filters')
+            if not eligible:
+                raise NoEligibleTask('No supported task matches the available worlds and scheduling filters',
+                                     retry_at=min(cooldown_deadlines, default=None))
             _, _, task, world, targets = max(eligible, key=lambda row: (row[0], row[1]))
             value = int.from_bytes(hashlib.sha256(f'{self.seed}:{run_id}'.encode()).digest()[:8], 'big') >> 1
             assignment = {'task': task['command'], 'task_id': task['id'], 'seconds': task['seconds'],

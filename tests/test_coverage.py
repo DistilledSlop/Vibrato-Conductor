@@ -2,8 +2,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from conductor.coverage import CoverageInventory
+from conductor.coverage import CoverageInventory, NoEligibleTask
 from conductor.storage import artifact_manifest, atomic_json
 
 
@@ -119,13 +120,37 @@ class FailureSchedulingTests(unittest.TestCase):
             task = next(t for t in inventory.snapshot()['targets'] if t['id'] == 'task:get-oak_log')
             self.assertEqual(task['failures'], 2)
             self.assertGreater(task['cooldownUntil'], __import__('time').time())
-            with self.assertRaisesRegex(ValueError, 'No supported task'): inventory.choose('during-cooldown')
+            with self.assertRaisesRegex(NoEligibleTask, 'No supported task') as pending:
+                inventory.choose('during-cooldown')
+            self.assertEqual(pending.exception.retry_at, task['cooldownUntil'])
             recovery = capture_run(root / 'runs', 'recovery', success=True, include_script=True)
             inventory.ingest(recovery)
             self.assertEqual(inventory.choose('after-recovery')['task_id'], 'get-oak_log')
             state = inventory.snapshot()['taskHealth'][0]
             self.assertEqual(state['consecutive_failures'], 0)
             self.assertEqual(state['failures'], 2)
+
+    def test_pause_deadline_only_includes_compatible_enabled_tasks_and_expiry_recovers(self):
+        with tempfile.TemporaryDirectory() as folder:
+            inventory = CoverageInventory(Path(folder) / 'coverage.sqlite',
+                                          enabled_tasks=['get-dirt', 'get-oak_log', 'observe-mobs'])
+            with inventory._db() as db:
+                for task, deadline in [('get-dirt',800),('get-oak_log',400),('observe-mobs',200),('nether',150)]:
+                    db.execute('INSERT INTO task_health(task_id,cooldown_until) VALUES(?,?)', (task,deadline))
+            with patch('conductor.coverage.time.time', return_value=100):
+                with self.assertRaises(NoEligibleTask) as pending:
+                    inventory.choose('waiting')
+            self.assertEqual(pending.exception.retry_at,400)  # Mob world prerequisite and disabled Nether excluded.
+            self.assertEqual(inventory.snapshot()['assignments'],0)
+            with patch('conductor.coverage.time.time', return_value=401):
+                self.assertEqual(inventory.choose('recovered')['task_id'],'get-oak_log')
+
+    def test_unavailable_world_bank_has_no_fabricated_retry_deadline(self):
+        with tempfile.TemporaryDirectory() as folder:
+            inventory = CoverageInventory(Path(folder) / 'coverage.sqlite', world_bank=Path(folder)/'missing')
+            with self.assertRaises(NoEligibleTask) as pending:
+                inventory.choose('missing-bank')
+            self.assertIsNone(pending.exception.retry_at)
 
 
 class InteractionGapTests(unittest.TestCase):
