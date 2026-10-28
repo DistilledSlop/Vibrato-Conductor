@@ -6,32 +6,45 @@ import os
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
+from uuid import uuid4
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_TRANSFORMER = Path('/opt/Protocol-Transformer')
+sys.path.insert(0, str(REPO_ROOT))
 from conductor.training import export_index
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--central', type=Path, required=True)
-    parser.add_argument('--output', type=Path, required=True, help='New output directory; never overwritten')
-    parser.add_argument('--transformer', type=Path, default=Path('/opt/Protocol-Transformer'))
-    parser.add_argument('--jobs', type=int, help='Parallel preprocessing workers (default: automatic)')
+    parser.add_argument('--central', type=Path, default=REPO_ROOT / '.state/gallery/dataset', help='Central admitted capture store (default: repository .state/gallery/dataset)')
+    parser.add_argument('--output', type=Path, help='New output directory; default: repository .state/training-<timestamp>-<unique id>; never overwritten')
+    parser.add_argument('--transformer', type=Path, default=DEFAULT_TRANSFORMER)
+    parser.add_argument('--jobs', type=int, default=48, help='Parallel preprocessing workers (default: 48)')
     parser.add_argument('--index-jobs', type=int, default=min(8, len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else os.cpu_count() or 1), help='Parallel admission checks (default: up to 8)')
     parser.add_argument('--run-id', action='append', help='Restrict to selected central runs; repeat for each')
-    parser.add_argument('--runtime-image', help='Use Node and proxy dependencies from this local worker image')
+    runtime = parser.add_mutually_exclusive_group()
+    runtime.add_argument('--runtime-image', default='vibrato-worker:dev', help='Use Node and proxy dependencies from this local worker image (default: vibrato-worker:dev)')
+    runtime.add_argument('--local-runtime', action='store_true', help='Use local Node and reader dependencies instead of a worker image')
     args = parser.parse_args()
     if args.jobs is not None and args.jobs < 1: parser.error('--jobs must be positive')
     if args.index_jobs < 1: parser.error('--index-jobs must be positive')
-    output = args.output.resolve()
+    output = (args.output or REPO_ROOT / '.state' / f"training-{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}-{uuid4().hex[:12]}").resolve()
     if output.exists(): parser.error('output already exists; choose a new dataset directory')
+    runtime_label = 'local Node' if args.local_runtime else args.runtime_image
+    print(f'Building dataset: central={args.central.resolve()} output={output} runtime={runtime_label} jobs={args.jobs} index_jobs={args.index_jobs}', file=sys.stderr, flush=True)
     output.parent.mkdir(parents=True, exist_ok=True)
     builder = args.transformer.resolve() / 'reader/dataset/dataset.js'
     if not builder.is_file(): parser.error('Protocol Transformer dataset builder missing')
     with tempfile.TemporaryDirectory(prefix='.dataset-build-', dir=output.parent) as tmp:
         root = Path(tmp)
         before = export_index(args.central, root / 'source-index.json', args.run_id, jobs=args.index_jobs)
+        # Freeze the complete initial scan, including rejected runs, while collection continues.
+        selected = args.run_id
+        if selected is None:
+            selected = sorted(run['runId'] for run in before['accepted'] + before['rejected'])
+            before['selectedRunIds'] = selected
         if args.run_id and before['rejected']:
             raise ValueError('A selected run is not currently admitted; inspect export rejections before retrying')
         if not before['split']['ready']:
@@ -40,7 +53,7 @@ def main():
         builder_args = ['build', '--out', str(stage), '--augment', '3',
                         *(['--jobs', str(args.jobs)] if args.jobs is not None else []),
                         '--val', ','.join(before['validationBases']), *before['trainBases']]
-        if args.runtime_image:
+        if not args.local_runtime:
             central = args.central.resolve(strict=True)
             reader = builder.parent.parent.resolve(strict=True)
             if any(',' in str(path) for path in (central, root, reader)):
@@ -56,7 +69,7 @@ def main():
         else:
             argv = ['node', str(builder), *builder_args]
         subprocess.run(argv, check=True)
-        after = export_index(args.central, root / 'source-index-after.json', args.run_id, jobs=args.index_jobs)
+        after = export_index(args.central, root / 'source-index-after.json', selected, jobs=args.index_jobs)
         if before != after:
             raise ValueError('Admission or capture set changed during preprocessing; retry with fresh inputs')
         manifest_path = stage / 'manifest.json'

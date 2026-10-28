@@ -175,14 +175,90 @@ class TrainingIntegrationTest(unittest.TestCase):
                 (stage / 'vocab.json').write_text('{}')
                 atomic_json(stage / 'manifest.json', {'vocab': str(stage / 'vocab.json'), 'sessions': []})
             output = root / 'dataset'
-            with patch.object(sys, 'argv', ['build', '--central', str(root / 'central'), '--output', str(output), '--transformer', str(root / 'transformer')]), patch.object(module.subprocess, 'run', side_effect=fake_run):
+            with patch.object(sys, 'argv', ['build', '--central', str(root / 'central'), '--output', str(output), '--transformer', str(root / 'transformer'), '--local-runtime']), patch.object(module.subprocess, 'run', side_effect=fake_run):
                 module.main()
             self.assertEqual(len(calls), 1)
             self.assertIn('--val', calls[0])
-            self.assertNotIn('--jobs', calls[0])  # transformer chooses its automatic resource limit
+            self.assertEqual(calls[0][0], 'node')
+            self.assertEqual(calls[0][calls[0].index('--jobs') + 1], '48')
             index = json.loads((output / 'source-index.json').read_text())
             self.assertEqual((output / 'val.txt').read_text().splitlines(), index['validationSessionNames'])
             self.assertEqual(json.loads((output / 'manifest.json').read_text())['vocab'], str(output / 'vocab.json'))
+
+    def test_builder_defaults_use_repository_paths_and_unique_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            central = root / '.state/gallery/dataset'
+            store = ArtifactStore(root / 'spool', central, root / 'state')
+            for name, seed in [('one', 1), ('two', 2)]:
+                make_run(root / 'spool', name, seed); store.enqueue(name)
+            store.deliver_pending()
+            builder = root / 'transformer/reader/dataset/dataset.js'
+            builder.parent.mkdir(parents=True); builder.write_text('// fixture')
+            script = Path(__file__).resolve().parents[1] / 'scripts/build-admitted-dataset.py'
+            spec = importlib.util.spec_from_file_location('admitted_default_builder', script)
+            module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+            calls = []
+            def fake_run(argv, check):
+                calls.append(argv)
+                stage = Path(argv[argv.index('--out') + 1]); stage.mkdir()
+                atomic_json(stage / 'manifest.json', {'vocab': str(stage / 'vocab.json'), 'sessions': []})
+            with patch.object(module, 'REPO_ROOT', root), patch.object(module, 'DEFAULT_TRANSFORMER', root / 'transformer'), patch.object(sys, 'argv', ['build']), patch.object(module.subprocess, 'run', side_effect=fake_run):
+                module.main()
+                module.main()
+            outputs = list((root / '.state').glob('training-*'))
+            self.assertEqual(len(outputs), 2)
+            self.assertTrue(all((output / 'source-index.json').is_file() for output in outputs))
+            for argv in calls:
+                self.assertEqual(argv[0], 'docker')
+                self.assertIn('vibrato-worker:dev', argv)
+                self.assertEqual(argv[argv.index('--jobs') + 1], '48')
+                self.assertTrue(any('src=' + str(central) + ',dst=' in arg for arg in argv))
+
+    def test_builder_pins_initial_runs_and_rechecks_admission(self):
+        for revoke in (False, True):
+            with self.subTest(revoke=revoke), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                store = ArtifactStore(root / 'spool', root / 'central', root / 'state')
+                for name, seed in [('one', 1), ('two', 2), ('excluded', 3)]:
+                    make_run(root / 'spool', name, seed); store.enqueue(name)
+                store.deliver_pending()
+                receipt = root / 'central/.admission/excluded.json'
+                data = json.loads(receipt.read_text()); data['quality']['eligible'] = False
+                atomic_json(receipt, data)
+                builder = root / 'transformer/reader/dataset/dataset.js'
+                builder.parent.mkdir(parents=True); builder.write_text('// fixture')
+                script = Path(__file__).resolve().parents[1] / 'scripts/build-admitted-dataset.py'
+                spec = importlib.util.spec_from_file_location('admitted_snapshot_builder', script)
+                module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+                def fake_run(argv, check):
+                    stage = Path(argv[argv.index('--out') + 1]); stage.mkdir()
+                    atomic_json(stage / 'manifest.json', {'vocab': str(stage / 'vocab.json'), 'sessions': []})
+                    make_run(root / 'spool', 'arrival', 4); store.enqueue('arrival'); store.deliver_pending()
+                    if revoke:
+                        path = root / 'central/.admission/one.json'
+                        changed = json.loads(path.read_text()); changed['quality']['eligible'] = False
+                        atomic_json(path, changed)
+                output = root / 'dataset'
+                argv = ['build', '--central', str(root / 'central'), '--output', str(output), '--transformer', str(root / 'transformer')]
+                with patch.object(sys, 'argv', argv), patch.object(module.subprocess, 'run', side_effect=fake_run):
+                    if revoke:
+                        with self.assertRaisesRegex(ValueError, 'changed during preprocessing'):
+                            module.main()
+                        self.assertFalse(output.exists())
+                    else:
+                        module.main()
+                        index = json.loads((output / 'source-index.json').read_text())
+                        self.assertEqual(index['selectedRunIds'], ['excluded', 'one', 'two'])
+                        self.assertEqual([run['runId'] for run in index['rejected']], ['excluded'])
+
+    def test_builder_runtime_options_are_mutually_exclusive(self):
+        script = Path(__file__).resolve().parents[1] / 'scripts/build-admitted-dataset.py'
+        spec = importlib.util.spec_from_file_location('admitted_args_builder', script)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        with patch.object(sys, 'argv', ['build', '--local-runtime', '--runtime-image', 'worker:test']):
+            with self.assertRaises(SystemExit):
+                module.main()
 
     def test_builder_uses_image_runtime_with_read_only_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
