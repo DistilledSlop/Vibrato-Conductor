@@ -226,6 +226,7 @@ class Worker:
         count = self.config.jvm_processors
         return [f'-XX:ActiveProcessorCount={count}',
                 f'-Djava.util.concurrent.ForkJoinPool.common.parallelism={count}',
+                '-Djava.util.concurrent.ForkJoinPool.common.maximumSpares=64',
                 f'-XX:ParallelGCThreads={min(count, 4)}', f'-XX:ConcGCThreads={min(count, 2)}']
 
     def scan_thread_failures(self):
@@ -407,6 +408,7 @@ class Worker:
             'scenario': self.config.task.removeprefix('@conductor_scenario ') if self.config.task.startswith('@conductor_scenario ') else None,
             'renderEnvironment': {key: os.environ.get(key) for key in ['LIBGL_ALWAYS_SOFTWARE','LP_NUM_THREADS','MESA_LOADER_DRIVER_OVERRIDE','DISPLAY']},
             'jvmSizing': {'activeProcessorCount': self.config.jvm_processors,
+                          'commonParallelism': self.config.jvm_processors, 'maximumSpares': 64,
                           'options': self.jvm_options(), 'purpose': 'thread_pool_sizing_hint'},
             'requestedResources': {'cpus': os.environ.get('REQUESTED_CPUS') or os.environ.get('WORKER_CPUS'),
                                    'cpuMax': (Path('/sys/fs/cgroup/cpu.max').read_text().strip() if Path('/sys/fs/cgroup/cpu.max').exists() else None)},

@@ -29,7 +29,8 @@ class WorkerTests(unittest.TestCase):
     def test_jvm_pool_sizing_and_pid_telemetry_capture_native_spawn_failures(self):
         worker=Worker(Config.read({'RUN_ID':'thread-test'}))
         self.assertEqual(worker.jvm_options(), ['-XX:ActiveProcessorCount=8',
-            '-Djava.util.concurrent.ForkJoinPool.common.parallelism=8', '-XX:ParallelGCThreads=4', '-XX:ConcGCThreads=2'])
+            '-Djava.util.concurrent.ForkJoinPool.common.parallelism=8',
+            '-Djava.util.concurrent.ForkJoinPool.common.maximumSpares=64', '-XX:ParallelGCThreads=4', '-XX:ConcGCThreads=2'])
         self.assertIn('-XX:ActiveProcessorCount=4',Worker(Config.read({'RUN_ID':'x','JVM_ACTIVE_PROCESSORS':'4'})).jvm_options())
         for invalid in ['0','65','1.5','nan']:
             with self.assertRaises(ValueError): Config.read({'RUN_ID':'x','JVM_ACTIVE_PROCESSORS':invalid})
