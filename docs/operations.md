@@ -55,7 +55,7 @@ Build the current mod and images, then run the unit suite. The live scripts exer
 
 ```bash
 python3 scripts/test-worker-live.py --id example-unique-id --task '@get dirt 1' \
-  --seconds 90 --mode collection --expect eligible --cpus 8 \
+  --seconds 90 --mode collection --expect eligible --cpus 8 --render-threads 2 \
   --accept-eula --accept-offline
 python3 scripts/test-docker-fleet-live.py --exercise --config .state/gallery/config.json
 python3 scripts/test-kubernetes-live.py --exercise --accept-eula --accept-offline

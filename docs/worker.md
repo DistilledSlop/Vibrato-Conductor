@@ -35,7 +35,7 @@ SIGTERM stops the client, drains the proxy, sends server console `stop`, waits f
 ```bash
 python3 -m unittest discover -s tests -v
 python3 scripts/test-worker-live.py --id fresh-probe-001 --task '@get dirt 1' \
-  --seconds 90 --mode collection --expect eligible --cpus 8 \
+  --seconds 90 --mode collection --expect eligible --cpus 8 --render-threads 2 \
   --accept-eula --accept-offline
 ```
 
