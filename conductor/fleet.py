@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 from .backends import BackendError, DockerBackend, KubernetesBackend, worker_env
 from .storage import verify_manifest
+from .coverage import NoEligibleTask
 
 ACTIVE = {'pending', 'created', 'starting', 'running', 'unhealthy', 'stopping', 'missing'}
 TERMINAL = {'completed', 'failed', 'lost', 'cancelled'}
@@ -217,6 +218,7 @@ class Fleet:
         self.backend = backend or (DockerBackend(self.config) if self.config.backend == 'docker' else KubernetesBackend(self.config))
         self.scheduler = scheduler
         self._paused_reason = None
+        self._next_eligible_wall = None
         self._last_capacity = None
         self._external_inhibition = None
 
@@ -439,6 +441,7 @@ class Fleet:
     def _reconcile_locked(self):
         now = self.clock()
         self._paused_reason = None
+        self._next_eligible_wall = None
         try: discovered = self.backend.list_workers()
         except Exception as error:
             with self.db: self._event('backend_error', str(error))
@@ -587,7 +590,15 @@ class Fleet:
         elif desired > self._last_capacity['limit']: self._paused_reason = 'resource_capacity_limit'
         if self._paused_reason in (None, 'resource_capacity_limit') and len(active) < min(desired, self._last_capacity['limit']):
             run_id = time.strftime('%Y%m%d%H%M%S', time.gmtime(now)) + '-' + uuid.uuid4().hex[:10]
-            spec = self._new_spec(run_id)
+            try:
+                spec = self._new_spec(run_id)
+            except NoEligibleTask as error:
+                # An intentional scheduler cooldown is a healthy admission pause.
+                # Existing workers were already monitored and desired remains persistent.
+                self._paused_reason = 'no_eligible_task'
+                self._next_eligible_wall = error.retry_at
+                self._cleanup()
+                return self.snapshot()
             with self.db:
                 self.db.execute('INSERT INTO workers(run_id,state,spec,created,updated) VALUES (?,?,?,?,?)',
                                 (run_id, 'pending', json.dumps(spec), now, now))
@@ -641,4 +652,5 @@ class Fleet:
             return {'fleetId': self.config.fleet_id, 'backend': self.config.backend, 'desired': int(self._setting('desired')),
                     'config': self.config.public(), 'capacity': self._last_capacity, 'counts': counts,
                     'workers': workers, 'events': events, 'pausedReason': self._paused_reason,
+                    'nextEligibleWall': self._next_eligible_wall,
                     'circuitUntil': float(self._setting('circuit_until')), 'coverage': coverage, 'wall': self.clock()}

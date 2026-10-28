@@ -7,6 +7,7 @@ from unittest.mock import patch
 from types import SimpleNamespace
 
 from conductor.fleet import Fleet, FleetConfig
+from conductor.coverage import NoEligibleTask
 from conductor.storage import atomic_json, artifact_manifest
 
 
@@ -80,6 +81,33 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(len(self.runtime.creates), 2)
         self.assertEqual(second['counts']['healthy'], 1)
         self.assertNotEqual(self.runtime.creates[0]['runId'], self.runtime.creates[1]['runId'])
+
+    def test_scheduler_cooldown_pauses_admission_but_monitors_existing_workers(self):
+        self.fleet.set_target(2)
+        first = self.fleet.reconcile()['workers'][0]['runId']
+        self.health(first)
+        deadline = self.clock() + 90
+        scheduler = SimpleNamespace(choose=lambda *args, **kwargs: None, snapshot=lambda: {})
+        self.fleet.scheduler = scheduler
+        self.clock.advance(5)
+        self.health(first)
+        with patch.object(scheduler, 'choose', side_effect=NoEligibleTask('cooldown', retry_at=deadline)):
+            state = self.fleet.reconcile()
+            self.assertEqual(state['desired'], 2)
+            self.assertEqual(state['counts']['healthy'], 1)
+            self.assertEqual(state['pausedReason'], 'no_eligible_task')
+            self.assertEqual(state['nextEligibleWall'], deadline)
+            self.assertEqual(len(self.runtime.creates), 1)
+            self.assertEqual(int(self.fleet._setting('consecutive_failures')), 0)
+            self.fleet.resume()
+            self.assertEqual(self.fleet.reconcile()['pausedReason'], 'no_eligible_task')
+        self.clock.advance(90)
+        self.health(first)
+        with patch.object(scheduler, 'choose', return_value={'task': '@get dirt 1', 'seed': 1, 'seconds': 60}):
+            state = self.fleet.reconcile()
+        self.assertIsNone(state['pausedReason'])
+        self.assertIsNone(state['nextEligibleWall'])
+        self.assertEqual(len(self.runtime.creates), 2)
 
     def test_recovery_adopts_lost_create_response_without_duplicate(self):
         self.runtime.ambiguous = True
