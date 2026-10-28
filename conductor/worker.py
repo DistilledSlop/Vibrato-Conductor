@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .storage import atomic_json, artifact_manifest, stage_world
 from .evidence import snapshot_world
-from .diagnostics import IntervalRate, Watchdog, task_success, script_failure_reason
+from .diagnostics import IntervalRate, Watchdog, task_success, script_failure_reason, native_thread_failure
 
 
 def number(env: dict, key: str, default: float, minimum: float, maximum: float) -> float:
@@ -58,6 +58,7 @@ class Config:
     failure_snapshots: bool = True
     snapshot_max_bytes: int = 256*1024**2
     snapshot_seconds: float = 10
+    jvm_processors: int = 8
 
     @classmethod
     def read(cls, env=None):
@@ -91,6 +92,8 @@ class Config:
         permission = number(env, 'OP_PERMISSION_LEVEL', 2, 1, 4) if operator else 0
         if permission != int(permission): raise ValueError('OP_PERMISSION_LEVEL must be an integer')
         operator_level = int(permission)
+        processors = number(env, 'JVM_ACTIVE_PROCESSORS', 8, 1, 64)
+        if processors != int(processors): raise ValueError('JVM_ACTIVE_PROCESSORS must be an integer')
         return cls(run_id, seed, task, number(env, 'RUN_SECONDS', 300, 10, 86400),
                    number(env, 'STARTUP_SECONDS', 240, 10, 1800),
                    number(env, 'HEARTBEAT_SECONDS', 45, 5, 600),
@@ -105,7 +108,7 @@ class Config:
                    number(env, 'WARMUP_SECONDS', 20, 0, 120), gamemode, operator, operator_level,
                    env.get('SNAPSHOT_FAILURES','true') == 'true',
                    int(number(env,'SNAPSHOT_MAX_BYTES',256*1024**2,1024,1024**3)),
-                   number(env,'SNAPSHOT_SECONDS',10,1,30))
+                   number(env,'SNAPSHOT_SECONDS',10,1,30), int(processors))
 
 
 def capture_evidence(captures: Path) -> dict:
@@ -170,6 +173,8 @@ class Worker:
         self.degraded_server_windows = 0
         self.classification = None
         self.resources = {}
+        self._log_positions = {}
+        self._native_thread_failure = None
         self.watchdog = Watchdog(config.stall_seconds, config.loop_seconds, config.pillar_seconds,
                                  assigned_task=config.task, settle_seconds=config.collection_settle_seconds if config.mode == 'collection' else 0)
         self.finalized = False
@@ -216,8 +221,43 @@ class Worker:
             if self.server_rate.rolling is not None and self.server_rate.rolling < 18:
                 self.degraded_server_windows += 1
 
-    def sample_resources(self):
-        root = Path('/sys/fs/cgroup')
+    def jvm_options(self):
+        # A JVM sizing hint bounds host-sized pools while leaving scheduling/CPU quotas untouched.
+        count = self.config.jvm_processors
+        return [f'-XX:ActiveProcessorCount={count}',
+                f'-Djava.util.concurrent.ForkJoinPool.common.parallelism={count}',
+                f'-XX:ParallelGCThreads={min(count, 4)}', f'-XX:ConcGCThreads={min(count, 2)}']
+
+    def scan_thread_failures(self):
+        if self._native_thread_failure: return self._native_thread_failure
+        for process in ('client', 'server'):
+            path = self.artifacts / 'logs' / (process + '.log')
+            try:
+                size = path.stat().st_size
+                position = self._log_positions.get(process, 0)
+                if size == position: continue
+                # Retain overlap for a partially written error line; bound work per polling interval.
+                with path.open('rb') as stream:
+                    stream.seek(max(0, min(position, size) - 1024, size - 65536))
+                    text = stream.read(65536).decode('utf-8', errors='replace')
+                    self._log_positions[process] = stream.tell()
+                proof = native_thread_failure(text)
+                if proof:
+                    self._native_thread_failure = {'process': process, 'path': f'logs/{process}.log', **proof}
+                    return self._native_thread_failure
+            except OSError: pass
+        return None
+
+    def infrastructure_failure(self):
+        assessment = Watchdog.infrastructure(self.resources)
+        if assessment:
+            self.classification = assessment
+            self.phase = 'unhealthy'
+            return assessment['reason']
+        return None
+
+    def sample_resources(self, root=None):
+        root = Path('/sys/fs/cgroup') if root is None else root
         def read(name):
             try: return (root / name).read_text().strip()
             except OSError: return None
@@ -234,9 +274,14 @@ class Worker:
         memory = int(usage) if usage and usage.isdigit() else None
         maximum = int(limit) if limit and limit.isdigit() else None
         cpu, events = stat('cpu.stat'), stat('memory.events')
+        pids, pids_limit, pids_events = read('pids.current'), read('pids.max'), stat('pids.events')
         memory_psi, cpu_psi = pressure('memory.pressure'), pressure('cpu.pressure')
         self.resources = {
             'memoryBytes': memory, 'memoryLimitBytes': maximum,
+            'pidsCurrent': int(pids) if pids and pids.isdigit() else None,
+            'pidsMax': int(pids_limit) if pids_limit and pids_limit.isdigit() else None,
+            'pidsLimitEvents': pids_events.get('max', 0),
+            'nativeThreadFailure': self.scan_thread_failures(),
             'cpuUsageSeconds': cpu.get('usage_usec', 0) / 1e6,
             'cpuThrottledSeconds': cpu.get('throttled_usec', 0) / 1e6,
             'cpuThrottledPeriods': cpu.get('nr_throttled', 0),
@@ -307,6 +352,8 @@ class Worker:
             if time.monotonic() > self.lifetime_deadline: raise RuntimeError('lifetime_limit')
             if self.storage_bytes() > self.config.max_bytes: raise RuntimeError('local_storage_limit')
             self.health()
+            failure = self.infrastructure_failure()
+            if failure: raise RuntimeError(failure)
             if test(): return
             time.sleep(1)
         raise RuntimeError(name + '_startup_timeout')
@@ -359,6 +406,8 @@ class Worker:
             'operatorPermissionLevel': self.config.operator_level, 'operatorLevel': self.config.operator_level,
             'scenario': self.config.task.removeprefix('@conductor_scenario ') if self.config.task.startswith('@conductor_scenario ') else None,
             'renderEnvironment': {key: os.environ.get(key) for key in ['LIBGL_ALWAYS_SOFTWARE','LP_NUM_THREADS','MESA_LOADER_DRIVER_OVERRIDE','DISPLAY']},
+            'jvmSizing': {'activeProcessorCount': self.config.jvm_processors,
+                          'options': self.jvm_options(), 'purpose': 'thread_pool_sizing_hint'},
             'requestedResources': {'cpus': os.environ.get('REQUESTED_CPUS') or os.environ.get('WORKER_CPUS'),
                                    'cpuMax': (Path('/sys/fs/cgroup/cpu.max').read_text().strip() if Path('/sys/fs/cgroup/cpu.max').exists() else None)},
             'identity': {'username': self.username, 'uuid': self.player_uuid},
@@ -374,7 +423,7 @@ class Worker:
     def launch(self, client, server, script, metadata):
         self.spawn('display', ['Xvfb', ':99', '-screen', '0', '1280x720x24', '-nolisten', 'tcp'], self.root)
         self.wait_for(lambda: Path('/tmp/.X11-unix/X99').exists(), 'display')
-        self.spawn('server', ['java', '-Xms512M', '-Xmx' + self.config.server_heap,
+        self.spawn('server', ['java', '-Xms512M', '-Xmx' + self.config.server_heap, *self.jvm_options(),
                              '-Dvibrato.telemetry.path=' + str(self.root / 'server-heartbeat.json'),
                              '-Dvibrato.assignedGamemode=' + self.config.gamemode,
                              '-jar', 'fabric-server-launch.jar', 'nogui'], server, stdin=subprocess.PIPE)
@@ -398,7 +447,7 @@ class Worker:
         natives = client / 'natives'
         natives.mkdir()
         options['nativesDirectory'] = str(natives)
-        options['jvmArguments'] += [f'-Dvibrato.seed={self.config.seed}', f'-Dvibrato.perf={self.config.perf}',
+        options['jvmArguments'] += self.jvm_options() + [f'-Dvibrato.seed={self.config.seed}', f'-Dvibrato.perf={self.config.perf}',
                                     f'-Dvibrato.script={script}', '-Dvibrato.campaignTelemetry=true',
                                     '-Dvibrato.assignedTask=' + self.config.task,
                                     '-Dvibrato.settleSeconds=' + str(self.config.collection_settle_seconds if self.config.mode == 'collection' else 0),
@@ -442,11 +491,13 @@ class Worker:
             self.health()
             self.copy_screenshot(client)
             resources = {'wall': time.time(), 'captureBytes': size, **self.resources}
-            for name in ['memory.current', 'memory.peak', 'cpu.stat', 'memory.events']:
+            for name in ['memory.current', 'memory.peak', 'cpu.stat', 'memory.events', 'pids.current', 'pids.max', 'pids.events']:
                 path = Path('/sys/fs/cgroup') / name
                 resources[name] = path.read_text().strip() if path.exists() else None
             with (self.artifacts / 'resources.jsonl').open('a') as stream:
                 stream.write(json.dumps(resources) + '\n')
+            failure = self.infrastructure_failure()
+            if failure: return failure
             local_bytes = self.storage_bytes()
             if local_bytes > self.config.max_bytes: return 'local_storage_limit'
             if now > self.lifetime_deadline: return 'lifetime_limit'
@@ -514,11 +565,16 @@ class Worker:
         except Exception as error:
             reason = str(error)
             self.sample_resources()
-            if self.resources.get('oomKills', 0):
+            failure = self.infrastructure_failure()
+            if failure: reason = failure
+            elif self.resources.get('oomKills', 0):
                 self.classification = Watchdog.assessment('worker_memory_exhausted', 'overload', 'confirmed', **self.resources)
         finally:
             self.phase = 'stopping'
             self.shutdown()
+        self.sample_resources()
+        failure = self.infrastructure_failure()
+        if failure: reason = failure
         for name in ['script-result.json', 'campaign-heartbeat.json', 'scenario-result.json']:
             source = self.root / 'client' / name
             if source.exists(): shutil.copyfile(source, self.artifacts / name)

@@ -1,5 +1,5 @@
 import unittest
-from conductor.diagnostics import IntervalRate, Watchdog, task_success, script_failure_reason
+from conductor.diagnostics import IntervalRate, Watchdog, task_success, script_failure_reason, native_thread_failure
 
 
 def client(**changes):
@@ -11,6 +11,24 @@ def client(**changes):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_native_thread_failure_is_confirmed_infrastructure_before_tick_overload(self):
+        for text in ['java.lang.OutOfMemoryError: unable to create native thread: resource limits reached',
+                     '[warning][os,thread] pthread_create failed (EAGAIN) for attributes: stacksize:1024k']:
+            proof=native_thread_failure(text)
+            self.assertIsNotNone(proof)
+            result=Watchdog().observe(None,None,{'nativeThreadFailure':proof,'pidsCurrent':512,'pidsMax':512,'pidsLimitEvents':3},0)
+            self.assertEqual(result['reason'],'worker_native_thread_exhausted')
+            self.assertEqual(result['kind'],'infrastructure')
+            self.assertEqual(result['confidence'],'confirmed')
+            self.assertEqual(result['evidence']['pidsLimitEvents'],3)
+        for text in ['java.lang.OutOfMemoryError: Java heap space', 'Failed to fetch user properties',
+                     'pthread_create succeeded', 'java.net.UnknownHostException: sessionserver.mojang.com']:
+            self.assertIsNone(native_thread_failure(text))
+        dog=Watchdog()
+        dog.observe(client(),None,{},0)
+        result=dog.observe(client(rollingTps=8,rollingSamples=10),None,{'nativeThreadFailure':proof},30)
+        self.assertEqual(result['reason'],'worker_native_thread_exhausted')
+
     def test_weighted_cumulative_rates_do_not_alias_skipped_one_second_windows(self):
         rate=IntervalRate(window=2)
         self.assertIsNone(rate.update(0,0))

@@ -26,6 +26,36 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(Config.read({'RUN_ID':'x','GAMEMODE':'creative'}).operator_level,0)
         self.assertEqual(Config.read({'RUN_ID':'x','OPERATOR':'true'}).operator_level,2)
 
+    def test_jvm_pool_sizing_and_pid_telemetry_capture_native_spawn_failures(self):
+        worker=Worker(Config.read({'RUN_ID':'thread-test'}))
+        self.assertEqual(worker.jvm_options(), ['-XX:ActiveProcessorCount=8',
+            '-Djava.util.concurrent.ForkJoinPool.common.parallelism=8', '-XX:ParallelGCThreads=4', '-XX:ConcGCThreads=2'])
+        self.assertIn('-XX:ActiveProcessorCount=4',Worker(Config.read({'RUN_ID':'x','JVM_ACTIVE_PROCESSORS':'4'})).jvm_options())
+        for invalid in ['0','65','1.5','nan']:
+            with self.assertRaises(ValueError): Config.read({'RUN_ID':'x','JVM_ACTIVE_PROCESSORS':invalid})
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            worker.artifacts=root/'artifacts'
+            logs=worker.artifacts/'logs';logs.mkdir(parents=True)
+            (root/'pids.current').write_text('512')
+            (root/'pids.max').write_text('512')
+            (root/'pids.events').write_text('max 184\n')
+            log=logs/'client.log'
+            log.write_text('normal startup\n')
+            self.assertIsNone(worker.sample_resources(root)['nativeThreadFailure'])
+            # A partially written line spanning polls must still be detected.
+            with log.open('a') as stream:stream.write('java.lang.OutOfMemoryError: unable to create native')
+            self.assertIsNone(worker.sample_resources(root)['nativeThreadFailure'])
+            with log.open('a') as stream:stream.write(' thread: resource limits reached\n')
+            resources=worker.sample_resources(root)
+            self.assertEqual((resources['pidsCurrent'],resources['pidsMax'],resources['pidsLimitEvents']),(512,512,184))
+            self.assertEqual(resources['nativeThreadFailure']['process'],'client')
+            self.assertEqual(worker.infrastructure_failure(),'worker_native_thread_exhausted')
+            log.write_text('rotated log\n')
+            self.assertEqual(worker.sample_resources(root)['nativeThreadFailure'],resources['nativeThreadFailure'])
+            (root/'pids.max').write_text('max')
+            self.assertIsNone(worker.sample_resources(root)['pidsMax'])
+
     def test_capture_proof_requires_both_directions_and_exact_offsets(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

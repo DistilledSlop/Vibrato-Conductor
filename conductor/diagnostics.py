@@ -50,6 +50,15 @@ class IntervalRate:
         return self.total_count/self.total_seconds if self.total_seconds else None
 
 
+def native_thread_failure(text):
+    """Require explicit JVM/native spawn failure; heap pressure and unrelated exceptions are distinct."""
+    for line in text.splitlines():
+        if ('OutOfMemoryError: unable to create native thread' in line
+                or ('pthread_create failed' in line and 'EAGAIN' in line)):
+            return {'source': 'jvm_log', 'message': line.strip()[:500]}
+    return None
+
+
 class Watchdog:
     def __init__(self, stall_seconds=600, loop_seconds=90, pillar_seconds=45, *, assigned_task=None, settle_seconds=0):
         self.stall_seconds = stall_seconds
@@ -73,7 +82,18 @@ class Watchdog:
     def assessment(reason, kind, confidence, **evidence):
         return {'reason': reason, 'kind': kind, 'confidence': confidence, 'evidence': evidence}
 
+    @classmethod
+    def infrastructure(cls, resources):
+        proof = resources.get('nativeThreadFailure')
+        if proof:
+            return cls.assessment('worker_native_thread_exhausted', 'infrastructure', 'confirmed',
+                                  nativeThreadFailure=proof, pidsCurrent=resources.get('pidsCurrent'),
+                                  pidsMax=resources.get('pidsMax'), pidsLimitEvents=resources.get('pidsLimitEvents'))
+        return None
+
     def observe(self, client, server, resources, now):
+        infrastructure = self.infrastructure(resources)
+        if infrastructure: return infrastructure
         if not client: return None
         if self.started is None: self.started = now
         if server and server.get('ticks') != self.last_server_tick and finite(server.get('tps')):
