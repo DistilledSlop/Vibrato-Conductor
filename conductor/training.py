@@ -6,6 +6,7 @@ preprocessing or training and never treats a worker verdict as admission.
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import shutil
@@ -129,19 +130,20 @@ def import_run(source: Path, config_path: Path) -> dict:
     return {'runId': run_id, 'manifestSha256': target_fingerprint, 'quality': receipt['quality'], 'central': str(target), 'coverageIngested': True}
 
 
-def export_index(central: Path, output: Path, run_ids: list[str] | None = None) -> dict:
+def export_index(central: Path, output: Path, run_ids: list[str] | None = None, *, jobs: int = 1) -> dict:
     central = Path(central).resolve(strict=True)
     accepted, rejected = [], []
     selected = set(run_ids) if run_ids is not None else None
     if selected is not None and (not selected or any(not IDENTIFIER.fullmatch(run_id) for run_id in selected)):
         raise ValueError('Run selection must contain valid run IDs')
-    seen = set()
-    for run in sorted(central.iterdir()):
-        if run.name.startswith('.') or not run.is_dir() or run.is_symlink() or not IDENTIFIER.fullmatch(run.name):
-            continue
-        if selected is not None and run.name not in selected:
-            continue
-        seen.add(run.name)
+    if jobs < 1:
+        raise ValueError('jobs must be positive')
+    runs = [run for run in sorted(central.iterdir())
+            if not run.name.startswith('.') and run.is_dir() and not run.is_symlink()
+            and IDENTIFIER.fullmatch(run.name) and (selected is None or run.name in selected)]
+    seen = {run.name for run in runs}
+
+    def inspect(run):
         try:
             result = verify_manifest(run)
             meta = json.loads((run / 'metadata.json').read_text())
@@ -176,12 +178,22 @@ def export_index(central: Path, output: Path, run_ids: list[str] | None = None) 
                 bases.append({'base': str(base), 'name': base.name, 'binarySha256': digest(binary),
                               'indexSha256': digest(index)})
             if not bases: raise ValueError('no_capture_pairs')
-            accepted.append({'runId': run.name, 'manifestSha256': manifest_hash,
+            return True, {'runId': run.name, 'manifestSha256': manifest_hash,
                              'admissionSha256': digest(receipt_path), 'policyVersion': quality['policyVersion'],
                              'worldGroup': str(seed), 'worldId': world.get('id'),
-                             'worldRevision': world.get('revision'), 'assignment': meta.get('assignment'), 'captures': bases})
+                             'worldRevision': world.get('revision'), 'assignment': meta.get('assignment'), 'captures': bases}
         except (OSError, ValueError, TypeError, KeyError) as error:
-            rejected.append({'runId': run.name, 'reason': str(error)})
+            return False, {'runId': run.name, 'reason': str(error)}
+
+    # map preserves run order so concurrency cannot change the index or split.
+    if jobs == 1:
+        results = map(inspect, runs)
+        for eligible, result in results:
+            (accepted if eligible else rejected).append(result)
+    else:
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            for eligible, result in pool.map(inspect, runs):
+                (accepted if eligible else rejected).append(result)
     if selected is not None and seen != selected:
         raise ValueError('Selected runs absent from central storage: ' + ', '.join(sorted(selected - seen)))
     # The reader names outputs by basename; reject collisions instead of overwriting rows.

@@ -17,11 +17,13 @@ def main():
     parser.add_argument('--central', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True, help='New output directory; never overwritten')
     parser.add_argument('--transformer', type=Path, default=Path('/opt/Protocol-Transformer'))
-    parser.add_argument('--jobs', type=int, default=1)
+    parser.add_argument('--jobs', type=int, help='Parallel preprocessing workers (default: automatic)')
+    parser.add_argument('--index-jobs', type=int, default=min(8, len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else os.cpu_count() or 1), help='Parallel admission checks (default: up to 8)')
     parser.add_argument('--run-id', action='append', help='Restrict to selected central runs; repeat for each')
     parser.add_argument('--runtime-image', help='Use Node and proxy dependencies from this local worker image')
     args = parser.parse_args()
-    if args.jobs < 1: parser.error('--jobs must be positive')
+    if args.jobs is not None and args.jobs < 1: parser.error('--jobs must be positive')
+    if args.index_jobs < 1: parser.error('--index-jobs must be positive')
     output = args.output.resolve()
     if output.exists(): parser.error('output already exists; choose a new dataset directory')
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -29,13 +31,14 @@ def main():
     if not builder.is_file(): parser.error('Protocol Transformer dataset builder missing')
     with tempfile.TemporaryDirectory(prefix='.dataset-build-', dir=output.parent) as tmp:
         root = Path(tmp)
-        before = export_index(args.central, root / 'source-index.json', args.run_id)
+        before = export_index(args.central, root / 'source-index.json', args.run_id, jobs=args.index_jobs)
         if args.run_id and before['rejected']:
             raise ValueError('A selected run is not currently admitted; inspect export rejections before retrying')
         if not before['split']['ready']:
             raise ValueError('Need eligible captures from at least two distinct world seeds for train and validation')
         stage = root / 'dataset'
-        builder_args = ['build', '--out', str(stage), '--augment', '3', '--jobs', str(args.jobs),
+        builder_args = ['build', '--out', str(stage), '--augment', '3',
+                        *(['--jobs', str(args.jobs)] if args.jobs is not None else []),
                         '--val', ','.join(before['validationBases']), *before['trainBases']]
         if args.runtime_image:
             central = args.central.resolve(strict=True)
@@ -53,7 +56,7 @@ def main():
         else:
             argv = ['node', str(builder), *builder_args]
         subprocess.run(argv, check=True)
-        after = export_index(args.central, root / 'source-index-after.json', args.run_id)
+        after = export_index(args.central, root / 'source-index-after.json', args.run_id, jobs=args.index_jobs)
         if before != after:
             raise ValueError('Admission or capture set changed during preprocessing; retry with fresh inputs')
         manifest_path = stage / 'manifest.json'

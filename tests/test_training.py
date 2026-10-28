@@ -139,6 +139,7 @@ class TrainingIntegrationTest(unittest.TestCase):
             revoked = json.loads(receipt.read_text()); revoked['quality']['eligible'] = False
             revoked['quality']['reasons'] = ['revoked']; atomic_json(receipt, revoked)
             index = export_index(root / 'central', root / 'index.json')
+            self.assertEqual(index, export_index(root / 'central', root / 'parallel-index.json', jobs=4))
             self.assertEqual(len(index['accepted']), 3)
             self.assertEqual(index['rejected'][0]['runId'], 'bad')
             self.assertTrue(index['split']['ready'])
@@ -178,6 +179,7 @@ class TrainingIntegrationTest(unittest.TestCase):
                 module.main()
             self.assertEqual(len(calls), 1)
             self.assertIn('--val', calls[0])
+            self.assertNotIn('--jobs', calls[0])  # transformer chooses its automatic resource limit
             index = json.loads((output / 'source-index.json').read_text())
             self.assertEqual((output / 'val.txt').read_text().splitlines(), index['validationSessionNames'])
             self.assertEqual(json.loads((output / 'manifest.json').read_text())['vocab'], str(output / 'vocab.json'))
@@ -199,10 +201,11 @@ class TrainingIntegrationTest(unittest.TestCase):
                 calls.append(argv)
                 stage = Path(argv[argv.index('--out') + 1]); stage.mkdir()
                 atomic_json(stage / 'manifest.json', {'vocab': str(stage / 'vocab.json'), 'sessions': []})
-            with patch.object(sys, 'argv', ['build', '--central', str(root / 'central'), '--output', str(root / 'dataset'), '--transformer', str(root / 'transformer'), '--runtime-image', 'worker:test']), patch.object(module.subprocess, 'run', side_effect=fake_run):
+            with patch.object(sys, 'argv', ['build', '--central', str(root / 'central'), '--output', str(root / 'dataset'), '--transformer', str(root / 'transformer'), '--runtime-image', 'worker:test', '--jobs', '3']), patch.object(module.subprocess, 'run', side_effect=fake_run):
                 module.main()
             argv = calls[0]
             self.assertEqual(argv[0], 'docker')
+            self.assertEqual(argv[argv.index('--jobs') + 1], '3')
             self.assertEqual(argv[argv.index('--network') + 1], 'none')
             self.assertIn('worker:test', argv)
             self.assertTrue(any('dst=/source-reader,readonly' in a for a in argv))
