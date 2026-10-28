@@ -395,7 +395,19 @@ class ArtifactStore:
                 return total
             spool = size(self.local_root)
             central = spool if self.local_root == self.central_root else size(self.central_root)
-            self._usage_value = {'liveSpoolBytes': spool, 'centralBytes': central}
+            retained = 0
+            with self._db() as db:
+                delivered = db.execute("SELECT run_id,manifest_sha FROM deliveries WHERE state='delivered'").fetchall()
+            for row in delivered:
+                source, target = self.local_root / row['run_id'], self.central_root / row['run_id']
+                if not source.is_dir() or source.is_symlink() or target.is_symlink(): continue
+                try:
+                    if (digest(target / 'manifest.json') == row['manifest_sha']
+                            and digest(source / 'manifest.json') == row['manifest_sha']):
+                        retained += size(source)
+                except OSError: pass  # An unverified/missing central publication never frees buffering capacity.
+            self._usage_value = {'liveSpoolBytes': spool, 'retainedDeliveredSpoolBytes': retained,
+                                 'undeliveredSpoolBytes': max(0, spool - retained), 'centralBytes': central}
             self._usage_at = now
             return self._usage_value
 
@@ -408,7 +420,7 @@ class ArtifactStore:
         return {'backend': 'filesystem', 'centralRoot': str(self.central_root), 'runs': rows, **usage,
                 'pendingBytes': pending_bytes, 'maxBufferBytes': self.max_buffer_bytes,
                 'maxCentralBytes': self.max_central_bytes,
-                'backpressure': max(pending_bytes, usage['liveSpoolBytes']) >= self.max_buffer_bytes
+                'backpressure': max(pending_bytes, usage['undeliveredSpoolBytes']) >= self.max_buffer_bytes
                     or usage['centralBytes'] + (pending_bytes if self.local_root != self.central_root else 0) >= self.max_central_bytes,
                 'delivered': sum(r['state'] == 'delivered' for r in rows),
                 'eligible': sum(r['state'] == 'delivered' and r['quality']['eligible'] for r in rows)}

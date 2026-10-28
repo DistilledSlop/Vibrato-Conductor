@@ -139,6 +139,29 @@ class ArtifactTests(unittest.TestCase):
 
 
 class ArtifactPolicyTests(unittest.TestCase):
+    def test_verified_delivered_retention_does_not_fill_pending_buffer(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = finalized(root / 'local', mode='collection', success=True)
+            store = ArtifactStore(root / 'local', root / 'central', root / 'state',
+                                  max_buffer_bytes=512, usage_cache_seconds=0)
+            store.enqueue(run.name)
+            self.assertTrue(store.snapshot()['backpressure'])
+            store.deliver_pending()
+            value = store.snapshot()
+            self.assertGreater(value['liveSpoolBytes'], 512)
+            self.assertEqual(value['retainedDeliveredSpoolBytes'], value['liveSpoolBytes'])
+            self.assertEqual(value['undeliveredSpoolBytes'], 0)
+            self.assertFalse(value['backpressure'])
+            live = root / 'local/live'
+            live.mkdir()
+            (live / 'raw.bin').write_bytes(b'x' * 512)
+            self.assertTrue(store.snapshot()['backpressure'])
+            (live / 'raw.bin').unlink()
+            (root / 'central' / run.name / 'manifest.json').unlink()
+            self.assertTrue(store.snapshot()['backpressure'])
+            self.assertTrue((run / 'manifest.json').exists())
+
     def test_live_unfinalized_spool_counts_towards_backpressure(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
