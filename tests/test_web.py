@@ -160,6 +160,12 @@ class WebTests(unittest.TestCase):
         self.assertEqual(json.loads(raw)['generation'], 1)
         self.assertEqual(self.request('/api/session', {'token': self.token})[0], 404)
 
+    def test_preview_route_auth_and_invalid_input_fail_closed(self):
+        self.assertEqual(self.request('/api/workers/test-run/preview?fps=24')[0], 401)
+        self.assertEqual(self.request('/api/workers/test-run/preview?fps=7', auth=True)[0], 400)
+        self.assertEqual(self.request('/api/workers/%2e%2e/preview?fps=24', auth=True)[0], 400)
+        self.assertEqual(self.request('/api/workers/test-run/preview?fps=24', auth=True)[0], 400)
+
     def test_static_console_and_token_file_permissions(self):
         status,headers,data=self.request('/')
         self.assertEqual(status,200);self.assertIn('Live worker gallery',data.decode())

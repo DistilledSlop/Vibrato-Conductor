@@ -43,6 +43,8 @@ def scoped_file(root: Path, relative: str) -> Path:
 class Service:
     def __init__(self, fleet, *, coverage=None, artifacts=None, interval=3, retention=None, compact_after_wall=None):
         self.fleet = fleet
+        from .preview import PreviewManager
+        self.previews = PreviewManager(fleet.backend) if getattr(fleet, 'backend', None) is not None else None
         self.coverage = coverage
         self.artifacts = artifacts
         self.interval = interval
@@ -172,6 +174,7 @@ class Service:
         self.thread.start()
 
     def close(self):
+        if self.previews is not None: self.previews.close()
         self.stop_event.set()
         with self.reconcile_condition: self.reconcile_condition.notify_all()
         if self.thread: self.thread.join(timeout=110)
@@ -317,6 +320,14 @@ class Handler(BaseHTTPRequestHandler):
                     return self.json(result if result is not None else {'error': 'Controller stopping'}, 200 if result is not None else 503)
                 if path == '/api/coverage':
                     return self.json(service.coverage.snapshot() if service.coverage else {})
+                match = re.fullmatch(r'/api/workers/([^/]+)/preview', path)
+                if match:
+                    run_id = match.group(1)
+                    if not RUN_ID.fullmatch(run_id): raise ValueError('Invalid run id')
+                    values = parse_qs(parsed.query).get('fps', [])
+                    if values not in (['1'], ['24']): raise ValueError('Preview fps must be 1 or 24')
+                    if service.previews is None: raise ValueError('Live preview unavailable')
+                    return self.preview(run_id, int(values[0]))
                 match = re.fullmatch(r'/api/workers/([^/]+)(/logs)?', path)
                 if match:
                     run_id, logs = match.groups()
@@ -341,6 +352,53 @@ class Handler(BaseHTTPRequestHandler):
         except FileNotFoundError as error: self.json({'error': str(error)}, 404)
         except (BrokenPipeError, ConnectionResetError): pass
         except Exception as error: self.json({'error': str(error)}, 500)
+
+    def preview(self, run_id, rate):
+        manager = self.server.service.previews
+        entry = manager.subscribe(run_id, rate)
+        sent = False
+        try:
+            deadline = time.monotonic() + 8
+            while True:
+                with manager.lock: producer = entry['producer']
+                if producer is None: return self.json({'error': 'Live preview unavailable'}, 503)
+                with producer.condition:
+                    producer.condition.wait_for(lambda: producer.frame is not None or producer.closed,
+                                                timeout=max(0, deadline - time.monotonic()))
+                    frame = producer.frame
+                with manager.lock: current = entry['producer']
+                if current is not producer:
+                    if time.monotonic() < deadline: continue
+                    return self.json({'error': 'Live preview unavailable'}, 503)
+                if frame is None: return self.json({'error': 'Live preview unavailable'}, 503)
+                break
+            self.send_response(200); self.headers_common()
+            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=frame')
+            self.end_headers(); sent = True
+            previous = None; last_sent = 0.0; last_fresh = time.monotonic()
+            while True:
+                with manager.lock: producer = entry['producer']
+                if producer is None: break
+                with producer.condition:
+                    producer.condition.wait_for(lambda: producer.closed or (producer.frame is not None and
+                        (id(producer), producer.sequence) != previous), timeout=2)
+                    frame, sequence, closed = producer.frame, producer.sequence, producer.closed
+                with manager.lock: current = entry['producer']
+                if current is not producer: continue
+                if closed: break
+                if frame is None or (id(producer), sequence) == previous:
+                    if time.monotonic() - last_fresh > 10: break
+                    continue
+                last_fresh = time.monotonic()
+                delay = 1.0 / rate - (time.monotonic() - last_sent)
+                if delay > 0: time.sleep(delay)
+                self.wfile.write(b'--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ' +
+                                 str(len(frame)).encode() + b'\r\n\r\n' + frame + b'\r\n')
+                self.wfile.flush(); last_sent = time.monotonic(); previous = (id(producer), sequence)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            if not sent: raise
+        finally:
+            manager.unsubscribe(run_id, entry, rate)
 
     def file(self, path, *, attachment=False):
         # The screenshot may be atomically replaced while a browser fetches it.

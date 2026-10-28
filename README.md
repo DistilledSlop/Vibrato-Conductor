@@ -2,7 +2,7 @@
 
 A persistent fleet controller for Minecraft 1.21.1 data collection. Each worker runs a real Vibrato client → recording proxy → its own Fabric server. Worlds are isolated copies of an immutable bank; captures and diagnostic evidence survive worker replacement.
 
-The controller provides Docker and Kubernetes backends, restart recovery, paced resource-limited launches, crash/unhealthy replacement, failure backoff, coverage-driven assignments, verified artifact delivery, and an authenticated monitoring dashboard. The gallery updates visible worker screenshots every 15 seconds; open a card for a larger screen, task state, tick health, process logs, and retained evidence.
+The controller provides Docker and Kubernetes backends, restart recovery, paced resource-limited launches, crash/unhealthy replacement, failure backoff, coverage-driven assignments, verified artifact delivery, and an authenticated monitoring dashboard. Visible gallery previews stream at up to 1 frame per second; open a card for a live detail view at up to 24 frames per second, task state, tick health, process logs, and retained evidence. Older workers without the preview encoder fall back to a still frame when available.
 
 ## Run locally
 

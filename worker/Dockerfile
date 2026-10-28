@@ -22,6 +22,7 @@ RUN python3 -u /opt/install.py && python3 /opt/preextract_server_bundle.py
 COPY vibrato/build/libs/ /opt/game/mods/
 COPY vibrato/build/server-mods/ /opt/server/mods/
 RUN python3 /opt/install.py --finalize-mods
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 RUN (getent passwd 1000 >/dev/null || useradd -m -u 1000 worker) \
     && mkdir /work /artifacts && chown 1000:1000 /work /artifacts
 COPY proxy/ /opt/proxy/
