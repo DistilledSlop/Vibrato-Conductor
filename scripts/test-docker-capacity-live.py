@@ -40,6 +40,7 @@ def main():
         test.api('/api/fleet', {'desired': args.workers})
         test.wait(lambda: len(test.healthy()) == args.workers, 'full fleet measured healthy', 480)
         expected = {w['runId'] for w in test.active()}
+        print('Holding measured healthy capacity window', flush=True)
         started = time.monotonic()
         while time.monotonic() - started < args.hold_seconds:
             workers = test.active()
