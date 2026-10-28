@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 
 from .storage import IDENTIFIER, atomic_json, digest, verify_manifest
+from .diagnostics import native_thread_failure
 
 
 def capture_integrity(root: Path) -> bool:
@@ -46,6 +47,17 @@ def quality_report(root: Path) -> dict:
     result = verify_manifest(root)
     metadata = json.loads((root / 'metadata.json').read_text())
     reasons = []
+    for component in ('client', 'server'):
+        log = root / 'logs' / (component + '.log')
+        if not log.is_file(): continue
+        with log.open(errors='replace') as stream:
+            overlap = ''
+            while chunk := stream.read(65536):
+                data = overlap + chunk
+                if native_thread_failure(data):
+                    reasons.append('worker_native_thread_exhausted')
+                    break
+                overlap = data[-1024:]
     if metadata.get('mode') != 'collection': reasons.append('diagnostic_mode')
     if result.get('diagnosticPassed') is not True: reasons.append('diagnostic_failed')
     if result.get('taskSuccess') is not True: reasons.append('task_success_unconfirmed')
@@ -319,6 +331,9 @@ class ArtifactStore:
                     try: os.fsync(descriptor)
                     finally: os.close(descriptor)
                 quality = quality_report(target)
+                atomic_json(self.central_root / '.admission' / (run_id + '.json'),
+                            {'runId': run_id, 'manifestSha256': job['manifest_sha'],
+                             'assessedWall': time.time(), 'quality': quality})
                 with self.lock, self._db() as db:
                     db.execute("UPDATE deliveries SET state='delivered',delivered_at=?,error=NULL,lease_until=0,quality=? WHERE run_id=?",
                                (time.time(), json.dumps(quality), run_id))
@@ -336,6 +351,24 @@ class ArtifactStore:
                 if stage.exists(): shutil.rmtree(stage)
                 self._usage_at = 0
         return outcomes
+
+    def reaudit(self, run_id: str) -> dict:
+        """Reassess delivered evidence under current rules without changing finalized artifacts."""
+        if not IDENTIFIER.fullmatch(run_id): raise ValueError('Invalid run id')
+        with self.lock, self._db() as db:
+            row = db.execute('SELECT * FROM deliveries WHERE run_id=?', (run_id,)).fetchone()
+            if row is None or row['state'] != 'delivered': raise ValueError('Run is not delivered')
+            root = self.central_root / run_id
+            if root.is_symlink() or digest(root / 'manifest.json') != row['manifest_sha']:
+                raise ValueError('Delivered manifest identity changed')
+            quality = quality_report(root)
+            audit = {'runId': run_id, 'manifestSha256': row['manifest_sha'], 'assessedWall': time.time(),
+                     'previousQuality': json.loads(row['quality']), 'quality': quality}
+            # Receipts live beside the run directories, outside their immutable manifests.
+            atomic_json(self.central_root / '.admission' / (run_id + '.json'), audit)
+            atomic_json(self.state_dir / 'admission-audits' / (run_id + '.json'), audit)
+            db.execute('UPDATE deliveries SET quality=? WHERE run_id=?', (json.dumps(quality), run_id))
+            return audit
 
     def _usage(self, force=False) -> dict:
         with self.lock:

@@ -27,6 +27,29 @@ def finalized(root, run_id='run-one', passed=True, mode='diagnostic', success=No
 
 
 class ArtifactTests(unittest.TestCase):
+    def test_reaudit_revokes_recovered_native_thread_failure_without_mutating_evidence(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = finalized(root / 'local', mode='collection', success=True)
+            (run / 'logs').mkdir()
+            (run / 'logs/client.log').write_text('x' * 65510 + '\njava.lang.OutOfMemoryError: unable to create native thread\n')
+            result = json.loads((run / 'result.json').read_text())
+            atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            store = ArtifactStore(root / 'local', root / 'central', root / 'state')
+            with patch('conductor.artifacts.native_thread_failure', return_value=None):
+                store.enqueue(run.name)
+                store.deliver_pending()
+            self.assertEqual(store.snapshot()['eligible'], 1)
+            central = root / 'central' / run.name
+            original = {str(p.relative_to(central)): p.read_bytes() for p in central.rglob('*') if p.is_file()}
+            audit = store.reaudit(run.name)
+            self.assertFalse(audit['quality']['eligible'])
+            self.assertIn('worker_native_thread_exhausted', audit['quality']['reasons'])
+            self.assertEqual(store.snapshot()['eligible'], 0)
+            self.assertEqual(original, {str(p.relative_to(central)): p.read_bytes() for p in central.rglob('*') if p.is_file()})
+            self.assertEqual(json.loads((root / 'central/.admission' / (run.name + '.json')).read_text()), audit)
+            self.assertTrue(result['datasetEligible'])  # Original worker verdict is preserved as evidence.
+
     def test_retry_survives_restart_and_publishes_only_verified_run(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

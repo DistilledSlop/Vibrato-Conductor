@@ -148,7 +148,9 @@ class Service:
         if inventory is not None:
             state['coverage'] = {k: v for k, v in inventory.items() if k not in ('targets', 'missing', 'unsupported')}
         if self.artifacts is not None: state['storage'] = self.artifacts.snapshot()
+        admissions = {row['run_id']: row.get('quality') for row in state.get('storage', {}).get('runs', [])}
         for worker in state.get('workers', []):
+            worker['admission'] = admissions.get(worker['runId'])
             path = self.artifact_root(worker['runId'])
             worker['liveHealth'] = read_json(path / 'health.json')
             worker['heartbeat'] = read_json(path / 'heartbeat.json')
