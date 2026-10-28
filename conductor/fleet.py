@@ -322,6 +322,15 @@ class Fleet:
             return data
         except (OSError, ValueError, TypeError): return None
 
+    @staticmethod
+    def _warming_up(health):
+        if not health: return True
+        sample_keys = ('clientMeanTpsSamples', 'serverMeanTpsSamples')
+        sampling = any(key in health for key in sample_keys) and any(
+            not isinstance(health.get(key), (int, float)) or not math.isfinite(health[key]) or health[key] < 10
+            for key in sample_keys)
+        return health.get('warmingUp') is True or health.get('worldReady') is not True or sampling
+
     def _health_problem(self, row, backend, health, now):
         age = now - row['created']
         spec = json.loads(row['spec'])
@@ -333,8 +342,7 @@ class Fleet:
         if now - health['wall'] > self.config.health_timeout: return 'stale_worker_health'
         phase = health.get('phase')
         classification = health.get('classification') or {}
-        warming = (health.get('warmingUp') is True or health.get('worldReady') is not True
-                   or health.get('capacityReady') is not True)
+        warming = self._warming_up(health)
         if phase == 'unhealthy':
             if not (warming and classification.get('kind') == 'overload' and classification.get('confidence') == 'inferred'):
                 return classification.get('reason') or 'worker_unhealthy'
@@ -576,8 +584,7 @@ class Fleet:
                         with self.db: self._event('stop_error', str(error), run_id)
             else:
                 state = ('running' if health and health.get('phase') == 'running'
-                         and health.get('capacityReady') is True and health.get('worldReady') is True
-                         and health.get('warmingUp') is False else 'starting')
+                         and not self._warming_up(health) else 'starting')
                 with self.db:
                     self.db.execute('UPDATE workers SET state=?,reason=NULL,unhealthy_since=NULL WHERE run_id=?', (state, run_id))
         self._last_capacity = self._capacity()

@@ -11,6 +11,32 @@ def client(**changes):
 
 
 class DiagnosticTests(unittest.TestCase):
+    def test_sustained_tick_overload_requires_thirty_seconds_and_recovery_resets_it(self):
+        for side in ('client', 'server'):
+            with self.subTest(side=side):
+                dog = Watchdog()
+                def observe(now, bad):
+                    return dog.observe(client(seconds=now, rollingTps=17 if bad and side=='client' else 20, rollingSamples=10),
+                        {'ticks':now,'tps':20,'rollingTps':17 if bad and side=='server' else 20,'rollingSamples':10}, {}, now)
+                self.assertIsNone(observe(0, False))
+                self.assertIsNone(observe(20, True))
+                self.assertIsNone(observe(49, True))
+                self.assertIsNone(observe(49.5, False))
+                self.assertIsNone(observe(50, True))
+                self.assertIsNone(observe(79.9, True))
+                assessment = observe(80, True)
+                self.assertEqual(assessment['reason'], side + '_tick_overload')
+                self.assertEqual(assessment['evidence']['sustainedSeconds'], 30)
+                self.assertEqual(assessment['evidence']['terminationGraceSeconds'], 30)
+
+    def test_native_and_confirmed_oom_fail_immediately_during_tick_recovery_grace(self):
+        dog=Watchdog()
+        dog.observe(client(), None, {}, 0)
+        self.assertIsNone(dog.observe(client(seconds=20,rollingTps=17,rollingSamples=10), None, {}, 20))
+        native={'nativeThreadFailure':{'message':'unable to create native thread'}}
+        self.assertEqual(dog.observe(client(seconds=21),None,native,21)['reason'],'worker_native_thread_exhausted')
+        self.assertEqual(dog.observe(None,None,{'memoryPressure':True,'oomKills':1},21)['reason'],'worker_memory_exhausted')
+
     def test_native_thread_failure_is_confirmed_infrastructure_before_tick_overload(self):
         for text in ['java.lang.OutOfMemoryError: unable to create native thread: resource limits reached',
                      '[warning][os,thread] pthread_create failed (EAGAIN) for attributes: stacksize:1024k']:
@@ -48,8 +74,10 @@ class DiagnosticTests(unittest.TestCase):
         for second in range(25):
             self.assertIsNone(dog.observe(client(seconds=second,tps=8,rollingTps=19,rollingSamples=10),
                 {'ticks':second,'tps':8,'rollingTps':20,'rollingSamples':10},{},second))
-        self.assertEqual(dog.observe(client(seconds=26,tps=20,rollingTps=16,rollingSamples=10),
-                {'ticks':26,'tps':20,'rollingTps':20,'rollingSamples':10},{},26)['reason'],'client_tick_overload')
+        self.assertIsNone(dog.observe(client(seconds=26,tps=20,rollingTps=16,rollingSamples=10),
+                {'ticks':26,'tps':20,'rollingTps':20,'rollingSamples':10},{},26))
+        self.assertEqual(dog.observe(client(seconds=56,tps=20,rollingTps=16,rollingSamples=10),
+                {'ticks':56,'tps':20,'rollingTps':20,'rollingSamples':10},{},56)['reason'],'client_tick_overload')
 
     def test_stationary_progress_is_not_stall_and_motion_is_not_progress(self):
         dog=Watchdog(stall_seconds=30)
@@ -93,8 +121,12 @@ class DiagnosticTests(unittest.TestCase):
     def test_overload_precedes_behavior_classification(self):
         dog=Watchdog(stall_seconds=5)
         result=None
-        for second in range(25):
-            result=dog.observe(client(),{'ticks':second,'tps':10},{'cpuPressure': True},second)
+        for second in range(20):
+            dog.observe(client(seconds=second,inventory={'dirt':second}),{'ticks':second,'tps':20},{},second)
+        for second in range(20,50):
+            self.assertIsNone(dog.observe(client(seconds=second),
+                {'ticks':second,'tps':10,'rollingTps':10,'rollingSamples':10},{'cpuPressure':True},second))
+        result=dog.observe(client(seconds=50),{'ticks':50,'tps':10,'rollingTps':10,'rollingSamples':10},{'cpuPressure':True},50)
         self.assertEqual(result['kind'],'overload')
         self.assertEqual(result['reason'],'server_tick_overload')
 
@@ -109,7 +141,7 @@ class DiagnosticTests(unittest.TestCase):
 
     def test_client_overload_does_not_require_server_overload(self):
         dog=Watchdog()
-        for second in range(25):
+        for second in range(51):
             result=dog.observe(client(seconds=second,tps=10),{'ticks':second,'tps':20},{},second)
         self.assertEqual(result['reason'],'client_tick_overload')
 
@@ -127,7 +159,8 @@ class DiagnosticTests(unittest.TestCase):
         for second in range(180):
             self.assertIsNone(dog.observe(client(seconds=second,settleRemainingSeconds=180-second,**proof),None,{},second))
         overloaded=client(seconds=181,tps=10,rollingTps=10,rollingSamples=10,settleRemainingSeconds=1,**proof)
-        self.assertEqual(dog.observe(overloaded,None,{},181)['reason'],'client_tick_overload')
+        self.assertIsNone(dog.observe(overloaded,None,{},181))
+        self.assertEqual(dog.observe({**overloaded,'seconds':211},None,{},211)['reason'],'client_tick_overload')
         dog=Watchdog(assigned_task='@get dirt 1',settle_seconds=180)
         self.assertEqual(dog.observe(client(settleRemainingSeconds=180,**proof),None,
                          {'memoryPressure':True,'oomKills':1},0)['reason'],'worker_memory_exhausted')

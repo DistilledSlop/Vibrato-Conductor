@@ -170,7 +170,6 @@ class Worker:
         self.client_measurements = deque(maxlen=86400)
         self.client_rolling = deque(maxlen=10)
         self.server_rolling = deque(maxlen=10)
-        self.degraded_server_windows = 0
         self.classification = None
         self.resources = {}
         self._log_positions = {}
@@ -218,8 +217,6 @@ class Worker:
             if interval is not None:
                 self.server_measurements.append(interval)
                 self.server_rolling.append(interval)
-            if self.server_rate.rolling is not None and self.server_rate.rolling < 18:
-                self.degraded_server_windows += 1
 
     def jvm_options(self):
         # A JVM sizing hint bounds host-sized pools while leaving scheduling/CPU quotas untouched.
@@ -309,6 +306,7 @@ class Worker:
             'clientMeanTps': self.client_rate.rolling, 'serverMeanTps': self.server_rate.rolling,
             'clientIntervalTps': self.client_rate.latest, 'serverIntervalTps': self.server_rate.latest,
             'clientMeanTpsSamples': len(self.client_rate.intervals), 'serverMeanTpsSamples': len(self.server_rate.intervals),
+            'clientDegradedWindows': self.client_rate.degraded_windows, 'serverDegradedWindows': self.server_rate.degraded_windows,
             'clientTicks': None if not self.last_client else self.last_client.get('clientTicks'),
             'serverTicks': None if not self.last_server else self.last_server.get('ticks'),
             'tickRateMethod': 'cumulative_counter_delta_weighted_elapsed',
@@ -613,16 +611,8 @@ class Worker:
                              and self.last_client.get('serverMode') == self.config.gamemode
                              and self.last_client.get('permissionSource') == 'server_observer'
                              and self.last_client.get('permissionLevel') == self.config.operator_level)
-        server_health = {
-            'samples': self.server_rate.samples, 'ticks': self.server_rate.total_count, 'seconds': self.server_rate.total_seconds,
-            'meanTps': self.server_rate.average, 'method': 'cumulative_counter_delta_weighted_elapsed',
-            'degradedWindows': self.degraded_server_windows,
-        }
-        server_health['valid'] = (server_health['samples'] >= 10 and server_health['meanTps'] >= 18
-                                  and not self.degraded_server_windows)
-        client_health = {'samples': self.client_rate.samples, 'ticks': self.client_rate.total_count, 'seconds': self.client_rate.total_seconds,
-                         'meanTps': self.client_rate.average, 'method': 'cumulative_counter_delta_weighted_elapsed'}
-        client_health['valid'] = client_health['samples'] >= 10 and client_health['meanTps'] >= 18
+        server_health = self.server_rate.summary()
+        client_health = self.client_rate.summary()
         invalid = []
         if not context_valid: invalid.append('assignment_context_unconfirmed')
         if not client_health['valid']: invalid.append('client_tick_health_not_established')

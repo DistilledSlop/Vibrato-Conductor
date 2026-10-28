@@ -134,6 +134,22 @@ class FleetTests(unittest.TestCase):
         self.health(run_id, worldReady=True, warmingUp=False, capacityReady=True)
         self.assertEqual(self.fleet.reconcile()['counts']['healthy'], 1)
 
+    def test_warm_worker_tick_recovery_is_not_reclassified_as_startup_timeout(self):
+        self.fleet.set_target(1)
+        run_id=self.fleet.reconcile()['workers'][0]['runId']
+        self.health(run_id,clientMeanTpsSamples=10,serverMeanTpsSamples=10)
+        self.fleet.reconcile()
+        self.clock.advance(self.config.startup_timeout+5)
+        self.health(run_id,capacityReady=False,clientMeanTps=17,serverMeanTps=17,
+                    clientMeanTpsSamples=10,serverMeanTpsSamples=10)
+        state=self.fleet.reconcile()
+        self.assertEqual(self.runtime.stops,[])
+        self.assertEqual(state['counts']['active'],1)
+        self.assertEqual(state['counts']['healthy'],0)
+        self.assertEqual(state['workers'][0]['state'],'running')
+        self.health(run_id,clientMeanTps=20,serverMeanTps=20,clientMeanTpsSamples=10,serverMeanTpsSamples=10)
+        self.assertEqual(self.fleet.reconcile()['counts']['healthy'],1)
+
     def test_adopted_terminal_runtime_is_not_completed_without_evidence(self):
         spec = {'runId': 'adopted-001', 'task': 'director', 'seed': 1, 'seconds': 30}
         self.runtime.workers['adopted-001'] = {'runId': 'adopted-001', 'backendId': 'existing',

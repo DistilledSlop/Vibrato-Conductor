@@ -10,9 +10,65 @@ from pathlib import Path
 
 from conductor.storage import atomic_json, artifact_manifest
 from conductor.worker import Config, Worker, capture_evidence
+from conductor.diagnostics import Watchdog
 
 
 class WorkerTests(unittest.TestCase):
+    def test_shared_counter_pause_recovers_without_termination_but_excludes_both_streams(self):
+        worker=Worker(Config.read({'RUN_ID':'shared-pause','MODE':'collection'}))
+        dog=Watchdog()
+        ticks=0
+        def observe(now):
+            return dog.observe({'seconds':now,'rootTask':'Nether','leafClass':'MineTask','tps':20,
+                        'rollingTps':worker.client_rate.rolling,'rollingSamples':len(worker.client_rate.intervals)},
+                       {'ticks':ticks,'tps':20,'rollingTps':worker.server_rate.rolling,
+                        'rollingSamples':len(worker.server_rate.intervals)}, {}, now)
+        for now in range(0,62,2):
+            ticks=now*20
+            worker.client_rate.update(ticks,now); worker.server_rate.update(ticks,now)
+            self.assertIsNone(observe(now))
+        # A shared 3-second scheduler pause widens one normally 2-second interval to 5 seconds.
+        now=65; ticks+=40
+        worker.client_rate.update(ticks,now); worker.server_rate.update(ticks,now)
+        self.assertLess(worker.client_rate.rolling,18)
+        self.assertIsNone(observe(now))
+        for now in range(67,107,2):
+            ticks+=40
+            worker.client_rate.update(ticks,now); worker.server_rate.update(ticks,now)
+            self.assertIsNone(observe(now))
+        self.assertEqual(worker.client_rate.rolling,20)
+        self.assertEqual(worker.server_rate.rolling,20)
+        self.assertEqual(dog.overload_since,{'client':None,'server':None})
+        for summary in (worker.client_rate.summary(),worker.server_rate.summary()):
+            self.assertGreater(summary['meanTps'],18)
+            self.assertGreater(summary['degradedWindows'],0)
+            self.assertFalse(summary['valid'])
+
+    def test_sustained_counter_degradation_terminates_and_stays_ineligible_after_recovery(self):
+        worker=Worker(Config.read({'RUN_ID':'sustained-overload','MODE':'collection'}))
+        dog=Watchdog()
+        ticks=0; first_bad=None; assessment=None
+        for now in range(0,182,2):
+            if now: ticks+=40 if now<=60 else 20
+            for rate in (worker.client_rate,worker.server_rate): rate.update(ticks,now)
+            bad=worker.client_rate.rolling is not None and worker.client_rate.rolling<18
+            if bad and first_bad is None: first_bad=now
+            assessment=dog.observe({'seconds':now,'rootTask':'Nether','leafClass':'MineTask','tps':20,
+                'rollingTps':worker.client_rate.rolling,'rollingSamples':len(worker.client_rate.intervals)},
+                {'ticks':ticks,'tps':20,'rollingTps':worker.server_rate.rolling,
+                 'rollingSamples':len(worker.server_rate.intervals)}, {}, now)
+            if assessment: break
+            if first_bad is not None: self.assertLess(now-first_bad,30)
+        self.assertEqual(assessment['reason'],'server_tick_overload')
+        self.assertEqual(now-first_bad,30)
+        # Later high lifetime means cannot erase measured bad segments from final quality.
+        for recover in range(now+2,now+402,2):
+            ticks+=40
+            for rate in (worker.client_rate,worker.server_rate): rate.update(ticks,recover)
+        for rate in (worker.client_rate,worker.server_rate):
+            self.assertGreater(rate.summary()['meanTps'],18)
+            self.assertFalse(rate.summary()['valid'])
+
     def test_rejects_paths_and_unbounded_settings(self):
         for values in ({'RUN_ID': '../escape'}, {'RUN_ID': 'x', 'RUN_SECONDS': 'nan'},
                        {'RUN_ID': 'x', 'WORLD_ID': '../escape'}, {'RUN_ID': 'x', 'SEED': str(2**63)},

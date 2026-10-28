@@ -19,6 +19,7 @@ class IntervalRate:
         self.samples = 0
         self.latest = None
         self.window = window
+        self.degraded_windows = 0
 
     def update(self, count, seconds):
         if not finite(count) or not finite(seconds): return None
@@ -38,6 +39,8 @@ class IntervalRate:
         self.total_seconds += elapsed
         self.samples += 1
         self.latest = change / elapsed
+        if self.rolling is not None and self.rolling < 18:
+            self.degraded_windows += 1
         return self.latest
 
     @property
@@ -48,6 +51,13 @@ class IntervalRate:
     @property
     def average(self):
         return self.total_count/self.total_seconds if self.total_seconds else None
+
+    def summary(self):
+        return {'samples': self.samples, 'ticks': self.total_count, 'seconds': self.total_seconds,
+                'meanTps': self.average, 'method': 'cumulative_counter_delta_weighted_elapsed',
+                'degradedWindows': self.degraded_windows,
+                'valid': self.samples >= 10 and self.average is not None and self.average >= 18
+                         and self.degraded_windows == 0}
 
 
 def native_thread_failure(text):
@@ -77,6 +87,7 @@ class Watchdog:
         self.assigned_task = assigned_task
         self.settle_seconds = settle_seconds
         self.settle_started = None
+        self.overload_since = {'server': None, 'client': None}
 
     @staticmethod
     def assessment(reason, kind, confidence, **evidence):
@@ -94,6 +105,8 @@ class Watchdog:
     def observe(self, client, server, resources, now):
         infrastructure = self.infrastructure(resources)
         if infrastructure: return infrastructure
+        if resources.get('memoryPressure') and resources.get('oomKills', 0) > 0:
+            return self.assessment('worker_memory_exhausted', 'overload', 'confirmed', **resources)
         if not client: return None
         if self.started is None: self.started = now
         if server and server.get('ticks') != self.last_server_tick and finite(server.get('tps')):
@@ -105,16 +118,25 @@ class Watchdog:
         # Timing or resource pressure takes precedence over conclusions about bot behavior.
         server_mean = (server.get('rollingTps') if server else None) if server and 'rollingSamples' in server else (mean(self.server_tps) if len(self.server_tps)==10 else None)
         client_mean = client.get('rollingTps') if 'rollingSamples' in client else (mean(self.client_tps) if len(self.client_tps)==10 else None)
-        if server_mean is not None and server_mean < 18 and now - self.started >= 20:
-            return self.assessment('server_tick_overload', 'overload', 'inferred',
-                                   meanServerTps=server_mean, samples=10,
-                                   cpuPressure=resources.get('cpuPressure'), memoryPressure=resources.get('memoryPressure'))
-        if client_mean is not None and client_mean < 18 and now - self.started >= 20:
-            return self.assessment('client_tick_overload', 'overload', 'inferred',
-                                   meanClientTps=client_mean, samples=10,
-                                   cpuPressure=resources.get('cpuPressure'), memoryPressure=resources.get('memoryPressure'))
-        if resources.get('memoryPressure') and resources.get('oomKills', 0) > 0:
-            return self.assessment('worker_memory_exhausted', 'overload', 'confirmed', **resources)
+        pending_overload = False
+        for side, value in (('server', server_mean), ('client', client_mean)):
+            if finite(value) and value < 18 and now - self.started >= 20:
+                if self.overload_since[side] is None: self.overload_since[side] = now
+                duration = now - self.overload_since[side]
+                if duration >= 30:
+                    return self.assessment(side + '_tick_overload', 'overload', 'inferred',
+                        **{'mean' + side.title() + 'Tps': value}, samples=10,
+                        sustainedSeconds=duration, terminationGraceSeconds=30,
+                        cpuPressure=resources.get('cpuPressure'), memoryPressure=resources.get('memoryPressure'))
+                pending_overload = True
+            else:
+                self.overload_since[side] = None
+        if pending_overload:
+            # Timing uncertainty cannot establish a behavior failure during its recovery interval.
+            self.last_progress = now
+            self.idle_since = None
+            self.history.clear()
+            return None
         # Only the configured assignment's successful idle barrier and bounded final EXIT permit idle.
         remaining = client.get('settleRemainingSeconds')
         planned_settle = (self.assigned_task is not None and self.assigned_task.startswith('@')
