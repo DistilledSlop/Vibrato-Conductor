@@ -18,6 +18,10 @@ Failure circuits pause repeated replacements instead of burning through worlds i
 
 Fleet settings include `fleet_id`, backend, persistent state/artifact/workspace paths, central delivery path, resource budgets, explicit worker limits, start pacing, health/startup timeouts, task catalog, enabled task IDs, and world bank IDs. `mode` selects diagnostic or collection; `gamemode` and operator permissions belong to each scenario assignment. `worker_env` can explicitly configure rendering threads and settle/warmup budgets; selected settings are recorded in run metadata.
 
+Set `max_workers=0` to remove the worker-count ceiling. Set `cpus=0` and `memory_mb=0` to omit container CPU and memory quotas, corresponding Kubernetes requests/limits, and their fleet admission/host-pressure gates. CPU/memory telemetry and tick-health checks remain active. Positive values retain bounded behavior. JVM client/server heap settings are independent application settings.
+
+With an unbounded worker count, storage still limits admission. Set `storage_budget_mb=0` to use available disk after the reserve rather than a fixed aggregate fleet budget. Per-run `storage_mb`, artifact buffering, delivery backpressure, disk reserve, and startup pacing still apply. The dashboard accepts any nonnegative integer target when the count ceiling is zero; it shows the current storage capacity separately.
+
 For a supplied bank, set:
 
 ```json

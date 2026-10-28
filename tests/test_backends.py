@@ -31,6 +31,24 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(next(v for v in container['env'] if v['name']=='RUN_ID')['value'], 'run-001')
         self.assertEqual(manifest['metadata']['labels'][FLEET_LABEL], 'test')
 
+    def test_unlimited_cpu_and_memory_omit_runtime_quotas_independently(self):
+        for cpus, memory in ((0, 0), (0, 6144), (8, 0)):
+            with self.subTest(cpus=cpus, memory=memory):
+                config = FleetConfig.from_dict({**self.config.__dict__, 'cpus': cpus, 'memory_mb': memory})
+                backend = DockerBackend(config)
+                with patch.object(backend, 'list_workers', return_value=[]), patch(
+                        'conductor.backends.command', side_effect=['created-id', 'started']) as invoke:
+                    self.assertEqual(backend.create_worker(self.spec), 'created-id')
+                argv = invoke.call_args_list[0].args[0]
+                self.assertEqual('--cpus' in argv, cpus > 0)
+                self.assertEqual('--memory' in argv, memory > 0)
+                container = KubernetesBackend(config).pod_manifest(self.spec)['spec']['containers'][0]
+                for field in ('requests', 'limits'):
+                    resources = container['resources'][field]
+                    self.assertEqual('cpu' in resources, cpus > 0)
+                    self.assertEqual('memory' in resources, memory > 0)
+                    self.assertEqual(resources['ephemeral-storage'], '8192Mi')
+
     def test_assignment_modes_and_operator_permissions_are_explicit(self):
         baseline = worker_env(self.config, self.spec)
         self.assertEqual(baseline['GAMEMODE'], 'survival')

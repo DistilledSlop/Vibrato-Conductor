@@ -109,11 +109,13 @@ class DockerBackend:
                 '--label', f'{FLEET_LABEL}={config.fleet_id}', '--label', f'{RUN_LABEL}={spec["runId"]}',
                 '--label', f'{SPEC_LABEL}={json.dumps(spec, separators=(",", ":"))}',
                 '--init', '--hostname', 'vibrato-worker', '--add-host', 'vibrato-worker:127.0.0.1',
-                '--network', 'none', '--cpus', str(config.cpus), '--memory', f'{config.memory_mb}m',
+                '--network', 'none',
                 '--pids-limit', '512', '--shm-size', '256m', '--read-only', '--stop-timeout', '90',
                 '--tmpfs', '/tmp:rw,exec,nosuid,size=512m', '--user', f'{config.worker_uid}:{config.worker_gid}',
                 '--mount', f'type=bind,src={workspace},dst=/work',
                 '--mount', f'type=bind,src={config.artifacts_dir},dst=/artifacts']
+        if config.cpus: argv += ['--cpus', str(config.cpus)]
+        if config.memory_mb: argv += ['--memory', f'{config.memory_mb}m']
         if config.world_bank:
             argv += ['--mount', f'type=bind,src={config.world_bank},dst=/world-bank,readonly']
         for key, value in worker_env(config, spec).items(): argv += ['--env', f'{key}={value}']
@@ -168,6 +170,9 @@ class KubernetesBackend:
         if config.world_bank_pvc:
             volumes.append({'name': 'world-bank', 'persistentVolumeClaim': {'claimName': config.world_bank_pvc, 'readOnly': True}})
             mounts.append({'name': 'world-bank', 'mountPath': '/world-bank', 'readOnly': True})
+        resources = {'ephemeral-storage': f'{config.storage_mb}Mi'}
+        if config.cpus: resources['cpu'] = str(config.cpus)
+        if config.memory_mb: resources['memory'] = f'{config.memory_mb}Mi'
         return {
             'apiVersion': 'v1', 'kind': 'Pod',
             'metadata': {'name': self.name(spec['runId']), 'namespace': config.namespace, 'labels': labels,
@@ -183,10 +188,8 @@ class KubernetesBackend:
                          'name': 'worker', 'image': config.image, 'imagePullPolicy': 'IfNotPresent',
                          'env': [{'name': key, 'value': value} for key, value in worker_env(config, spec).items()],
                          'resources': {
-                             'requests': {'cpu': str(config.cpus), 'memory': f'{config.memory_mb}Mi',
-                                          'ephemeral-storage': f'{config.storage_mb}Mi'},
-                             'limits': {'cpu': str(config.cpus), 'memory': f'{config.memory_mb}Mi',
-                                        'ephemeral-storage': f'{config.storage_mb}Mi'},
+                             'requests': dict(resources),
+                             'limits': dict(resources),
                          },
                          'securityContext': {'allowPrivilegeEscalation': False, 'readOnlyRootFilesystem': True,
                                              'capabilities': {'drop': ['ALL']}},

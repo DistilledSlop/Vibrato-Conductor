@@ -36,8 +36,8 @@ function updateState(next){
   $('desired').textContent=number(state.desired);$('healthy').textContent=number(counts.healthy??counts.running);
   $('starting').textContent=number((counts.starting||0)+(counts.pending||0)+(counts.created||0));
   $('completed').textContent=number(counts.completed);$('failed').textContent=`${number((counts.failed||0)+(counts.lost||0))} failed runs retained`;
-  const limit=state.capacity?.limit??state.config?.max_workers??0;$('capacity').textContent=`Safety ceiling ${number(limit)} workers`;
-  if(document.activeElement!==$('target'))$('target').value=state.desired||0;$('target').max=state.config?.max_workers??100;
+  const limit=state.capacity?.limit??state.config?.max_workers??0;$('capacity').textContent=state.config?.max_workers===0?`No count ceiling · storage capacity ${number(limit)}`:`Capacity ${number(limit)} workers`;
+  if(document.activeElement!==$('target'))$('target').value=state.desired||0;if(state.config?.max_workers>0)$('target').max=state.config.max_workers;else $('target').removeAttribute('max');
   $('runtimeType').textContent=(state.backend==='kubernetes'?'Kubernetes':'Docker')+' runtime';
   $('subtitle').textContent=`${state.fleetId||'Default fleet'} · ${state.config?.mode||'diagnostic'} mode · Minecraft 1.21.1`;
   const error=state.controller?.error||state.controller?.deliveryError;const notice=error||state.pausedReason;
