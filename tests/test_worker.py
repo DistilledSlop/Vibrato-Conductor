@@ -21,6 +21,7 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(Config.read({'RUN_ID': 'x', 'TASK': '@get oak_log 1'}).task, '@get oak_log 1')
         for extra in [{'GAMEMODE':'admin'},{'OPERATOR':'yes'},{'OPERATOR':'true','OP_PERMISSION_LEVEL':'1.5'}]:
             with self.assertRaises(ValueError): Config.read({'RUN_ID':'x',**extra})
+        self.assertEqual(Config.read({'RUN_ID':'x','COLLECTION_SETTLE_SECONDS':'180'}).collection_settle_seconds,180)
         self.assertEqual(Config.read({'RUN_ID':'x'}).operator_level,0)
         self.assertEqual(Config.read({'RUN_ID':'x','GAMEMODE':'creative'}).operator_level,0)
         self.assertEqual(Config.read({'RUN_ID':'x','OPERATOR':'true'}).operator_level,2)

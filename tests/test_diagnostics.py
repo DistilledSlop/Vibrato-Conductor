@@ -101,6 +101,34 @@ class DiagnosticTests(unittest.TestCase):
         self.assertIsNone(dog.observe(client(rootTask=None,leafClass=None),None,{},30))
         self.assertEqual(dog.observe(client(rootTask=None,leafClass=None),None,{},61)['reason'],'idle_without_active_task')
 
+    def test_bounded_successful_settle_skips_behavior_but_retains_overload(self):
+        proof = dict(rootTask=None, rootClass=None, leafClass=None, scriptPhase='post_task_settle',
+                     assignedTask='@get dirt 1', assignedTaskStatus='completed', settleBudgetSeconds=180,
+                     settleSource='completed_command_idle_barrier_pending_exit')
+        dog=Watchdog(stall_seconds=30, assigned_task='@get dirt 1', settle_seconds=180)
+        for second in range(180):
+            self.assertIsNone(dog.observe(client(seconds=second,settleRemainingSeconds=180-second,**proof),None,{},second))
+        overloaded=client(seconds=181,tps=10,rollingTps=10,rollingSamples=10,settleRemainingSeconds=1,**proof)
+        self.assertEqual(dog.observe(overloaded,None,{},181)['reason'],'client_tick_overload')
+        dog=Watchdog(assigned_task='@get dirt 1',settle_seconds=180)
+        self.assertEqual(dog.observe(client(settleRemainingSeconds=180,**proof),None,
+                         {'memoryPressure':True,'oomKills':1},0)['reason'],'worker_memory_exhausted')
+
+    def test_settle_requires_exact_assignment_success_and_deadline(self):
+        proof=dict(rootTask=None,rootClass=None,leafClass=None,scriptPhase='post_task_settle',
+                   assignedTask='@get dirt 1',assignedTaskStatus='completed',settleBudgetSeconds=120,
+                   settleRemainingSeconds=120,settleSource='completed_command_idle_barrier_pending_exit')
+        for changes, assignment in [({},'director'), ({'assignedTaskStatus':'dispatched'},'@get dirt 1'),
+                ({'assignedTask':'@get stone 1'},'@get dirt 1'), ({'settleBudgetSeconds':180},'@get dirt 1'),
+                ({'scriptPhase':'executing'},'@get dirt 1')]:
+            dog=Watchdog(assigned_task=assignment,settle_seconds=120)
+            dog.observe(client(**{**proof,**changes}),None,{},0)
+            self.assertEqual(dog.observe(client(**{**proof,**changes}),None,{},61)['reason'],'idle_without_active_task')
+        dog=Watchdog(assigned_task='@get dirt 1',settle_seconds=120)
+        dog.observe(client(**proof),None,{},0)
+        self.assertIsNone(dog.observe(client(**proof),None,{},123))
+        self.assertEqual(dog.observe(client(**proof),None,{},184)['reason'],'idle_without_active_task')
+
     def test_script_timeout_cancel_and_error_keep_distinct_causes(self):
         self.assertEqual(script_failure_reason('@nether', {'commands':[{'status':'timeout'}]}),'task_budget_exceeded')
         self.assertEqual(script_failure_reason('@nether', {'commands':[{'status':'error'}]}),'task_command_error')

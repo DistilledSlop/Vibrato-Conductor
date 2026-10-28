@@ -101,7 +101,7 @@ class Config:
                    number(env, 'WATCHDOG_PILLAR_SECONDS', 45, 15, 600),
                    env.get('SCREENSHOTS', 'true') == 'true',
                    int(number(env, 'SCREENSHOT_SECONDS', 15, 5, 300)),
-                   number(env, 'COLLECTION_SETTLE_SECONDS', 45, 0, 120),
+                   number(env, 'COLLECTION_SETTLE_SECONDS', 45, 0, 3600),
                    number(env, 'WARMUP_SECONDS', 20, 0, 120), gamemode, operator, operator_level,
                    env.get('SNAPSHOT_FAILURES','true') == 'true',
                    int(number(env,'SNAPSHOT_MAX_BYTES',256*1024**2,1024,1024**3)),
@@ -170,7 +170,8 @@ class Worker:
         self.degraded_server_windows = 0
         self.classification = None
         self.resources = {}
-        self.watchdog = Watchdog(config.stall_seconds, config.loop_seconds, config.pillar_seconds)
+        self.watchdog = Watchdog(config.stall_seconds, config.loop_seconds, config.pillar_seconds,
+                                 assigned_task=config.task, settle_seconds=config.collection_settle_seconds if config.mode == 'collection' else 0)
         self.finalized = False
         self.lifetime_deadline = self.started + config.startup_seconds * 3 + config.seconds + config.collection_settle_seconds + 90
 
@@ -399,6 +400,8 @@ class Worker:
         options['nativesDirectory'] = str(natives)
         options['jvmArguments'] += [f'-Dvibrato.seed={self.config.seed}', f'-Dvibrato.perf={self.config.perf}',
                                     f'-Dvibrato.script={script}', '-Dvibrato.campaignTelemetry=true',
+                                    '-Dvibrato.assignedTask=' + self.config.task,
+                                    '-Dvibrato.settleSeconds=' + str(self.config.collection_settle_seconds if self.config.mode == 'collection' else 0),
                                     '-Dvibrato.screenshots=' + str(self.config.screenshots).lower(),
                                     '-Dvibrato.screenshotIntervalSeconds=' + str(self.config.screenshot_seconds),
                                     '-Dvibrato.serverTelemetryFile=' + str(self.root / 'server-heartbeat.json')]

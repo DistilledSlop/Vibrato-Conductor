@@ -51,7 +51,7 @@ class IntervalRate:
 
 
 class Watchdog:
-    def __init__(self, stall_seconds=600, loop_seconds=90, pillar_seconds=45):
+    def __init__(self, stall_seconds=600, loop_seconds=90, pillar_seconds=45, *, assigned_task=None, settle_seconds=0):
         self.stall_seconds = stall_seconds
         self.loop_seconds = loop_seconds
         self.pillar_seconds = pillar_seconds
@@ -65,6 +65,9 @@ class Watchdog:
         self.last_server_tick = None
         self.started = None
         self.idle_since = None
+        self.assigned_task = assigned_task
+        self.settle_seconds = settle_seconds
+        self.settle_started = None
 
     @staticmethod
     def assessment(reason, kind, confidence, **evidence):
@@ -92,6 +95,22 @@ class Watchdog:
                                    cpuPressure=resources.get('cpuPressure'), memoryPressure=resources.get('memoryPressure'))
         if resources.get('memoryPressure') and resources.get('oomKills', 0) > 0:
             return self.assessment('worker_memory_exhausted', 'overload', 'confirmed', **resources)
+        # Only the configured assignment's successful idle barrier and bounded final EXIT permit idle.
+        remaining = client.get('settleRemainingSeconds')
+        planned_settle = (self.assigned_task is not None and self.assigned_task.startswith('@')
+            and self.settle_seconds > 0 and client.get('scriptPhase') == 'post_task_settle'
+            and client.get('assignedTask') == self.assigned_task and client.get('assignedTaskStatus') == 'completed'
+            and client.get('settleSource') == 'completed_command_idle_barrier_pending_exit'
+            and client.get('settleBudgetSeconds') == self.settle_seconds
+            and finite(remaining) and 0 < remaining <= self.settle_seconds
+            and not client.get('rootTask') and not client.get('rootClass') and not client.get('leafClass'))
+        if planned_settle:
+            if self.settle_started is None: self.settle_started = now
+            if now - self.settle_started <= self.settle_seconds + 2:
+                self.idle_since = None
+                self.last_progress = now
+                self.history.clear()
+                return None
         semantic = (tuple(sorted(client.get('inventory', {}).items())), client.get('blocksBrokenCount'),
                     client.get('taskCompletedCount'), client.get('dimension'), client.get('experienceLevel'),
                     client.get('experienceProgress'))

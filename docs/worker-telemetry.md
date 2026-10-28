@@ -66,3 +66,5 @@ python3 scripts/test-worker-live.py --id creative-new \
   --cpus 8 --render-threads 2 --image vibrato-worker:modes \
   --accept-eula --accept-offline
 ```
+
+Explicit collection tasks expose `scriptPhase=post_task_settle` only when the assigned command and task outcome completed, its `wait-idle` barrier succeeded, and the final delayed EXIT is pending with no active task/path. `settleRemainingSeconds` and `settleBudgetSeconds` describe that bounded window (`COLLECTION_SETTLE_SECONDS`, default45, allowed0..3600). The watchdog matches the configured command/budget and maintains its own elapsed bound. It pauses behavior/idle classifiers during this verified window; tick overload, heartbeat/capture/process health, storage and lifetime limits remain enforced. Director runs and failed, cancelled or unconfirmed commands receive no settle exemption.
