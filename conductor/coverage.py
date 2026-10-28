@@ -1,6 +1,7 @@
 """Evidence-based coverage inventory and reproducible deficit scheduling."""
 from __future__ import annotations
 import hashlib
+from collections import Counter, defaultdict
 from contextlib import contextmanager
 import json
 import re
@@ -49,6 +50,9 @@ class CoverageInventory:
         self.lock = threading.RLock()
         self.tasks = json.loads((self.catalog_path / 'tasks.json').read_text())['tasks']
         for task in self.tasks:
+            task.setdefault('family', task['id'])
+            if not isinstance(task['family'], str) or not re.fullmatch(r'[a-z][a-z0-9_-]{0,63}', task['family']):
+                raise ValueError('Invalid task family: ' + str(task['family']))
             task.setdefault('gamemode', 'survival')
             task.setdefault('operator', False)
             task.setdefault('operatorLevel', 2)
@@ -163,6 +167,7 @@ class CoverageInventory:
             'server_confirmed_permission_denial', {'unsupportedReason': 'No authoritative denied-command response instrumentation yet'})
         for task in self.tasks:
             details = {'command': task['command'], 'seconds': task['seconds'], 'gamemode': task['gamemode'],
+                       'family': task['family'],
                        'operator': task['operator'], 'operatorLevel': task['operatorLevel'], 'scenario': task.get('scenario'),
                        'requiresTags': task.get('requiresTags', []), 'unsupportedReason': task.get('unsupportedReason')}
             add('task:' + task['id'], 'task', task.get('description', task['id']), task['supported'],
@@ -178,13 +183,18 @@ class CoverageInventory:
     def _context_id(task_id, gamemode, operator):
         return 'task-context:' + task_id + ':' + gamemode + ':' + ('operator' if operator else 'non_operator')
 
-    def choose(self, run_id: str, worlds=None) -> dict:
+    def choose(self, run_id: str, worlds=None, pending_run_ids=None) -> dict:
         """Persist allocation before backend create; retries of a run id receive the same assignment."""
         if not IDENTIFIER.fullmatch(run_id): raise ValueError('Invalid run id')
         with self.lock, self._db() as db:
             db.execute('BEGIN IMMEDIATE')
             previous = db.execute('SELECT assignment FROM assignments WHERE run_id=?', (run_id,)).fetchone()
             if previous: return json.loads(previous[0])
+            if isinstance(pending_run_ids, str): raise ValueError('pending_run_ids must contain explicit run ids')
+            pending_ids = list(pending_run_ids or ())
+            if any(not isinstance(value, str) or not IDENTIFIER.fullmatch(value) for value in pending_ids):
+                raise ValueError('Invalid pending run id')
+            pending_ids = sorted(set(pending_ids))
             bank = {w['id']: w for w in inspect_world_bank(self.world_bank)} if self.world_bank else {}
             if worlds:
                 available = [bank.get(w, {'id': w, 'tags': [], 'supported': not bool(self.world_bank)}) if isinstance(w, str) else w for w in worlds]
@@ -199,6 +209,23 @@ class CoverageInventory:
             health = {r['task_id']: dict(r) for r in db.execute('SELECT * FROM task_health')}
             now = time.time()
             assigned = dict(db.execute('SELECT task_id,COUNT(*) FROM assignments GROUP BY task_id'))
+            families = {task['id']: task['family'] for task in self.tasks}
+            family_assigned = Counter()
+            for task_id, count in assigned.items(): family_assigned[families.get(task_id, task_id)] += count
+            world_assigned, task_world_assigned = Counter(), Counter()
+            for record in db.execute("SELECT task_id,json_extract(assignment,'$.world_id') AS world_id,COUNT(*) AS n FROM assignments GROUP BY task_id,world_id"):
+                world_assigned[record['world_id']] += record['n']
+                task_world_assigned[record['task_id'], record['world_id']] += record['n']
+            # Only the controller knows which reservations are actually pending/live. Failed creates
+            # and terminal un-ingested runs must never become permanent inferred active reservations.
+            pending_task, pending_family, pending_world = Counter(), Counter(), Counter()
+            if pending_ids:
+                placeholders = ','.join('?' for _ in pending_ids)
+                for record in db.execute('SELECT task_id,assignment FROM assignments WHERE run_id IN (' + placeholders + ')', pending_ids):
+                    task_id = record['task_id']
+                    pending_task[task_id] += 1
+                    pending_family[families.get(task_id, task_id)] += 1
+                    pending_world[json.loads(record['assignment']).get('world_id')] += 1
             counts = dict(db.execute('SELECT target_id,COUNT(*) FROM observations GROUP BY target_id'))
             successes = dict(db.execute('SELECT target_id,COUNT(*) FROM successes GROUP BY target_id'))
             for task in self.tasks:
@@ -217,13 +244,30 @@ class CoverageInventory:
                     deficit = sum(1 / (1 + counts.get(t, 0) + 2 * successes.get(t, 0)) for t in targets) / len(targets)
                     score = deficit / ((1 + assigned.get(task['id'], 0)) * (1 + task_health.get('consecutive_failures', 0)))
                     tie = hashlib.sha256(f'{self.seed}:{run_id}:{task["id"]}:{world.get("id")}'.encode()).hexdigest()
-                    eligible.append((score, tie, task, world, targets))
+                    eligible.append({'score': score, 'tie': tie, 'task': task, 'world': world,
+                                     'targets': targets, 'deficit': deficit / (1 + task_health.get('consecutive_failures', 0))})
             if not eligible:
                 raise NoEligibleTask('No supported task matches the available worlds and scheduling filters',
                                      retry_at=min(cooldown_deadlines, default=None))
-            _, _, task, world, targets = max(eligible, key=lambda row: (row[0], row[1]))
+            # Average each family's task deficits: a family with many catalogue variants must not
+            # receive more slots merely because it contains more individually underrepresented tasks.
+            family_tasks = defaultdict(dict)
+            for row in eligible: family_tasks[row['task']['family']][row['task']['id']] = row
+            family = max(family_tasks, key=lambda name: (
+                -pending_family[name],
+                sum(row['deficit'] for row in family_tasks[name].values()) / len(family_tasks[name]) / (1 + family_assigned[name]),
+                hashlib.sha256(f'{self.seed}:{run_id}:family:{name}'.encode()).hexdigest()))
+            task_row = max(family_tasks[family].values(), key=lambda row: (
+                -pending_task[row['task']['id']], row['score'],
+                hashlib.sha256(f'{self.seed}:{run_id}:task:{row["task"]["id"]}'.encode()).hexdigest()))
+            task = task_row['task']
+            selected = max((row for row in eligible if row['task']['id'] == task['id']), key=lambda row: (
+                -pending_world[row['world'].get('id')],
+                -task_world_assigned[task['id'], row['world'].get('id')],
+                -world_assigned[row['world'].get('id')], row['tie']))
+            world, targets = selected['world'], selected['targets']
             value = int.from_bytes(hashlib.sha256(f'{self.seed}:{run_id}'.encode()).digest()[:8], 'big') >> 1
-            assignment = {'task': task['command'], 'task_id': task['id'], 'seconds': task['seconds'],
+            assignment = {'task': task['command'], 'task_id': task['id'], 'family': task['family'], 'seconds': task['seconds'],
                           'seed': value, 'world_id': world.get('id'), 'target_ids': targets,
                           'world_revision': world.get('revision'), 'requires_tags': task.get('requiresTags', []),
                           'gamemode': task['gamemode'], 'operator': task['operator'], 'operatorLevel': task['operatorLevel'], 'scenario': task.get('scenario')}

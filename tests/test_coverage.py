@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 import tempfile
 import unittest
 from pathlib import Path
@@ -151,6 +152,93 @@ class FailureSchedulingTests(unittest.TestCase):
             with self.assertRaises(NoEligibleTask) as pending:
                 inventory.choose('missing-bank')
             self.assertIsNone(pending.exception.retry_at)
+
+
+class DiversitySchedulingTests(unittest.TestCase):
+    def inventory(self, root, tasks, name='coverage', seed=73):
+        catalog = root / 'catalog'
+        catalog.mkdir(exist_ok=True)
+        atomic_json(catalog / 'tasks.json', {'tasks': tasks})
+        atomic_json(catalog / 'protocol-767.json', {'packets': []})
+        atomic_json(catalog / 'registries-1.21.1.json', {'items': [], 'blocks': [], 'mobs': [], 'entities': []})
+        (catalog / 'obtainable-items.txt').write_text('')
+        return CoverageInventory(root / (name + '.sqlite'), catalog_path=catalog, seed=seed)
+
+    def task(self, identifier, family):
+        return {'id':identifier, 'family':family, 'command':'@get '+identifier+' 1',
+                'seconds':60,'targets':[],'supported':True,'requiresTags':[]}
+
+    def test_unequal_catalog_sizes_do_not_crowd_smaller_families(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            tasks = [self.task('gather-'+str(i),'gather') for i in range(8)]
+            tasks += [self.task('creative-'+str(i),'creative') for i in range(2)]
+            tasks += [self.task('operator','operator')]
+            inventory = self.inventory(root,tasks)
+            assignments = [inventory.choose('rotation-'+str(i)) for i in range(30)]
+            self.assertEqual(Counter(a['family'] for a in assignments), {'gather':10,'creative':10,'operator':10})
+            gather = Counter(a['task_id'] for a in assignments if a['family']=='gather')
+            self.assertEqual(len(gather),8)
+            self.assertLessEqual(max(gather.values())-min(gather.values()),1)
+            self.assertEqual(inventory.snapshot()['categories']['task']['observed'],0)
+
+    def test_explicit_pending_work_spreads_families_and_does_not_infer_old_reservations_active(self):
+        with tempfile.TemporaryDirectory() as folder:
+            inventory = self.inventory(Path(folder),[self.task('old','gather'),self.task('new','creative')])
+            inventory.enabled_tasks={'old'}
+            for index in range(20): inventory.choose('historical-'+str(index))
+            inventory.enabled_tasks=None
+            first = inventory.choose('active-one')
+            self.assertEqual(first['task_id'],'new')
+            second = inventory.choose('active-two',pending_run_ids=['active-one'])
+            self.assertEqual(second['task_id'],'old')
+            self.assertEqual(second,inventory.choose('active-two',pending_run_ids=[]))
+            # Old un-ingested reservations are history, not assumed active work.
+            self.assertEqual(inventory.choose('next',pending_run_ids=[])['task_id'],'new')
+
+    def test_pending_task_preference_operates_within_a_shared_family(self):
+        with tempfile.TemporaryDirectory() as folder:
+            inventory = self.inventory(Path(folder),[self.task('old','gather'),self.task('new','gather')])
+            inventory.enabled_tasks={'old'}
+            for index in range(20): inventory.choose('historical-'+str(index))
+            inventory.enabled_tasks=None
+            self.assertEqual(inventory.choose('active-one')['task_id'],'new')
+            self.assertEqual(inventory.choose('active-two',pending_run_ids=['active-one'])['task_id'],'old')
+
+    def test_world_rotation_is_balanced_deterministic_and_respects_pending_worlds(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            tasks=[self.task('one','gather')]
+            left=self.inventory(root,tasks,'left')
+            right=self.inventory(root,tasks,'right')
+            worlds=[{'id':name,'supported':True} for name in ('forest','plains','desert')]
+            a=[left.choose('world-'+str(i),worlds=worlds) for i in range(9)]
+            b=[right.choose('world-'+str(i),worlds=list(reversed(worlds))) for i in range(9)]
+            self.assertEqual(a,b)
+            self.assertEqual(Counter(row['world_id'] for row in a),{'forest':3,'plains':3,'desert':3})
+            active=left.choose('world-active',worlds=worlds)
+            next_assignment=left.choose('world-next',worlds=worlds,pending_run_ids=['world-active'])
+            self.assertNotEqual(active['world_id'],next_assignment['world_id'])
+
+    def test_observed_deficits_still_prioritize_uncovered_family(self):
+        with tempfile.TemporaryDirectory() as folder:
+            inventory=self.inventory(Path(folder),[self.task('known','gather'),self.task('unseen','creative')])
+            with inventory._db() as db:
+                for target in ('task:known',inventory._context_id('known','survival',False)):
+                    db.execute('INSERT INTO observations VALUES(?,?,?,?)',('proof',target,1,'[]'))
+                    db.execute('INSERT INTO successes VALUES(?,?)',('proof',target))
+            self.assertEqual(inventory.choose('deficit')['task_id'],'unseen')
+
+    def test_incompatible_or_cooling_families_never_earn_rotation_slots(self):
+        with tempfile.TemporaryDirectory() as folder:
+            tasks=[self.task('gather','gather'),self.task('fixture','creative'),self.task('cooling','operator')]
+            tasks[1]['requiresTags']=['fixture']
+            inventory=self.inventory(Path(folder),tasks)
+            with inventory._db() as db:
+                db.execute('INSERT INTO task_health(task_id,cooldown_until) VALUES(?,?)',('cooling',1000))
+            with patch('conductor.coverage.time.time',return_value=100):
+                for index in range(3):
+                    self.assertEqual(inventory.choose('safe-'+str(index))['task_id'],'gather')
 
 
 class InteractionGapTests(unittest.TestCase):
