@@ -61,7 +61,7 @@ def main():
     check.add_argument('run', type=Path)
     web = commands.add_parser('serve', help='Run the fleet reconciler, authenticated API, and dashboard')
     web.add_argument('--config', type=Path, required=True)
-    web.add_argument('--host', default='127.0.0.1')
+    web.add_argument('--host', default='0.0.0.0')
     web.add_argument('--port', type=int, default=8080)
     web.add_argument('--token-file', type=Path)
     scale = commands.add_parser('scale', help='Change a running conductor fleet target')

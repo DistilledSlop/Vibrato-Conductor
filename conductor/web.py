@@ -346,7 +346,7 @@ def load_token(path: Path) -> str:
     return token
 
 
-def serve(config_path, host='127.0.0.1', port=8080, token_file=None):
+def serve(config_path, host='0.0.0.0', port=8080, token_file=None):
     from .fleet import Fleet, FleetConfig
     from .coverage import CoverageInventory
     from .artifacts import ArtifactStore
