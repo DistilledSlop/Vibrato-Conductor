@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
 
-from conductor.fleet import Fleet, FleetConfig
-from conductor.coverage import NoEligibleTask
+from conductor.fleet import Fleet, FleetConfig, ACTIVE, TERMINAL
+from conductor.coverage import CoverageInventory, NoEligibleTask
 from conductor.storage import atomic_json, artifact_manifest
 
 
@@ -317,6 +317,45 @@ class FleetTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'operator must be boolean'): self.fleet.reconcile()
         self.assertEqual(self.runtime.creates, [])
         self.assertEqual(self.fleet.snapshot()['workers'], [])
+
+    def test_scheduler_receives_active_reservations_without_terminal_history(self):
+        received = []
+        def choose(run_id, worlds=None, pending_run_ids=None):
+            received.append((run_id, worlds, pending_run_ids))
+            return {'task': 'director', 'seed': 1, 'seconds': 60}
+        self.fleet.scheduler = SimpleNamespace(choose=choose, snapshot=lambda: {})
+        with self.fleet.db:
+            for state in ACTIVE | TERMINAL:
+                self.fleet.db.execute('INSERT INTO workers(run_id,state,spec,created,updated) VALUES(?,?,?,?,?)',
+                    ('worker-' + state, state, '{}', self.clock(), self.clock()))
+        self.fleet._new_spec('next-assignment')
+        self.assertEqual(received[0][0], 'next-assignment')
+        self.assertIsNone(received[0][1])
+        self.assertEqual(set(received[0][2]), {'worker-' + state for state in ACTIVE})
+
+    def test_pending_family_rotation_survives_imbalanced_history_with_uncapped_workers(self):
+        catalog = self.root / 'catalog'
+        shutil.copytree(Path(__file__).resolve().parents[1] / 'catalogs', catalog)
+        path = catalog / 'tasks.json'
+        data = json.loads(path.read_text())
+        data['tasks'] = [task for task in data['tasks'] if task['id'] in ('director', 'get-dirt', 'get-oak_log')]
+        for task in data['tasks']:
+            task['family'] = 'director' if task['id'] == 'director' else 'gathering'
+        path.write_text(json.dumps(data))
+        inventory = CoverageInventory(self.root / 'coverage.sqlite', catalog_path=catalog, enabled_tasks=['director'])
+        for number in range(20): inventory.choose('historical-' + str(number))
+        inventory.enabled_tasks = {'director', 'get-dirt', 'get-oak_log'}
+        self.fleet.scheduler = inventory
+        self.fleet.config.max_workers = self.fleet.config.cpus = self.fleet.config.memory_mb = 0
+        self.fleet.set_target(2)
+        first = self.fleet.reconcile()['workers'][0]
+        self.assertIn(first['assignment']['task_id'], ('get-dirt', 'get-oak_log'))
+        self.health(first['runId'])
+        self.clock.advance(5)
+        self.fleet.reconcile()
+        self.assertEqual(len(self.runtime.creates), 2)
+        self.assertEqual(self.runtime.creates[1]['task_id'], 'director')
+        self.assertEqual((self.fleet.config.max_workers, self.fleet.config.cpus, self.fleet.config.memory_mb), (0, 0, 0))
 
     def test_requested_fleet_larger_than_budget_starts_only_what_fits(self):
         self.fleet.set_target(3)

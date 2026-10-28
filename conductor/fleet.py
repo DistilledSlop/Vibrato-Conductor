@@ -420,7 +420,11 @@ class Fleet:
 
     def _new_spec(self, run_id):
         if self.scheduler:
-            spec = dict(self.scheduler.choose(run_id, worlds=self.config.world_ids or None))
+            states = sorted(ACTIVE)
+            placeholders = ','.join('?' for _ in states)
+            pending = [row['run_id'] for row in self.db.execute(
+                f'SELECT run_id FROM workers WHERE state IN ({placeholders}) ORDER BY created,run_id', states)]
+            spec = dict(self.scheduler.choose(run_id, worlds=self.config.world_ids or None, pending_run_ids=pending))
             spec['worldId'] = spec.pop('world_id', spec.get('worldId'))
         else:
             number = self.db.execute('SELECT COUNT(*) FROM workers').fetchone()[0]
