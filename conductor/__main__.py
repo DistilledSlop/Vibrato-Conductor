@@ -136,11 +136,11 @@ def main():
         return serve(args.config, args.host, args.port, args.token_file)
     if args.command in ('scale', 'fleet-status'):
         import urllib.request
-        token = args.token_file.read_text().strip()
+        token = args.token_file.read_text().strip() if args.token_file.exists() else None
         endpoint = '/api/fleet' if args.command == 'scale' else '/api/state'
         body = json.dumps({'desired': args.target}).encode() if args.command == 'scale' else None
         request = urllib.request.Request(args.url.rstrip('/') + endpoint, data=body,
-            headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
+            headers={**({'Authorization': 'Bearer ' + token} if token else {}), 'Content-Type': 'application/json'})
         with urllib.request.urlopen(request, timeout=120) as response: print(response.read().decode())
         return 0
     if args.command == 'status':

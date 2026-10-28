@@ -26,7 +26,7 @@ def import_run(source: Path, config_path: Path) -> dict:
     config_data = json.loads(Path(config_path).read_text())
     service_keys = {'max_buffer_bytes', 'enabled_tasks', 'canary_tasks', 'max_active_canaries', 'catalog_dir', 'delivery_retry_seconds',
                     'spool_success_days', 'spool_failure_days', 'central_diagnostic_days', 'central_failure_days',
-                    'workspace_success_days', 'workspace_failure_days', 'max_central_bytes', 'compact_retention'}
+                    'workspace_success_days', 'workspace_failure_days', 'max_central_bytes', 'compact_retention', 'require_token'}
     compact_enabled = config_data.get('compact_retention', True)
     if not isinstance(compact_enabled, bool): raise ValueError('compact_retention must be a boolean')
     fleet = FleetConfig.from_dict({k: v for k, v in config_data.items() if k not in service_keys})

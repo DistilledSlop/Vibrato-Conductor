@@ -5,7 +5,7 @@ const number = n => Number(n||0).toLocaleString();
 const bytes = n => { n=Number(n||0); if(!n)return '0 B'; const u=['B','KiB','MiB','GiB','TiB']; const i=Math.min(4,Math.floor(Math.log(n)/Math.log(1024))); return `${(n/1024**i).toFixed(i?1:0)} ${u[i]}`; };
 const age = wall => { const s=Math.max(0,Date.now()/1000-Number(wall||Date.now()/1000)); return s<60?`${Math.floor(s)}s` : s<3600?`${Math.floor(s/60)}m`:`${Math.floor(s/3600)}h ${Math.floor(s%3600/60)}m`; };
 const activeStates=new Set(['pending','created','starting','running','healthy','unhealthy','stopping','missing']);
-let firstSnapshot=true;
+let firstSnapshot=true, authRequired=true;
 let state=null, filter='active', view='gallery', detailId=null, detailGeneration=0, polling=false, authenticated=false, coverageInventory=null;
 const cardRefs=new Map();
 const visible=new Set();
@@ -17,7 +17,7 @@ async function api(path, options={}){
   if(!response.ok)throw new Error(result.error||`Request failed (${response.status})`);
   return result;
 }
-function setAuthenticated(ok){authenticated=ok;$('loginPanel').hidden=ok;$('console').hidden=!ok;$('logout').hidden=!ok;$('connectionText').textContent=ok?'Live connection':'Console locked';$('connectionDot').classList.toggle('error',!ok);}
+function setAuthenticated(ok){authenticated=ok;$('loginPanel').hidden=ok;$('console').hidden=!ok;$('logout').hidden=!ok||!authRequired;$('connectionText').textContent=ok?'Live connection':'Console locked';$('connectionDot').classList.toggle('error',!ok);}
 function toast(message,error=false){const n=$('toast');n.textContent=message;n.hidden=false;n.classList.toggle('error',error);clearTimeout(toast.timer);toast.timer=setTimeout(()=>n.hidden=true,4500);}
 function pill(status){return make('span',`pill ${status||'neutral'}`,status==='running'?'Healthy':(status||'unknown').replaceAll('_',' '));}
 function health(worker){return worker.liveHealth||worker.health||{};}
@@ -30,7 +30,7 @@ function taskSummary(worker){const hb=heartbeat(worker);if(worker.failureDetail)
 function shortId(id){return id.length>23?id.slice(0,11)+'…'+id.slice(-8):id;}
 function selected(){return (state?.workers||[]).filter(w=>filter==='all'||(filter==='active'?activeStates.has(w.state):['unhealthy','failed','lost'].includes(w.state)));}
 function updateState(next){
-  state=next;setAuthenticated(true);
+  state=next;authRequired=next.authRequired!==false;if(!authRequired)$('token').value='';setAuthenticated(true);
   if(firstSnapshot){firstSnapshot=false;if(!(state.counts?.active)&&state.workers?.length){filter='all';document.querySelectorAll('[data-filter]').forEach(b=>b.classList.toggle('active',b.dataset.filter==='all'));}}
   const counts=state.counts||{};$('environment').textContent=(state.fleetId||'FLEET')+' / OPERATIONS';
   $('desired').textContent=number(state.desired);$('healthy').textContent=number(counts.healthy??counts.running);

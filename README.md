@@ -21,7 +21,7 @@ cp deploy/fleet.docker.example.json .state/fleet-local.json
 python3 -m conductor serve --config .state/fleet-local.json --port 8080
 ```
 
-The dashboard binds **0.0.0.0:8080** by default. Open **http://HOST:8080/** using the server’s reachable address (or **http://127.0.0.1:8080/** on the server). Read the access-token file printed on startup and paste it into the console. The initial fleet target is zero; use the dashboard to start workers. Keep the token out of Git and chat. An operator-managed TLS ingress or authenticated tunnel can also front the dashboard.
+The dashboard binds **0.0.0.0:8080** by default. Open **http://HOST:8080/** using the server’s reachable address (or **http://127.0.0.1:8080/** on the server). By default, read the access-token file printed on startup and paste it into the console. Set `"require_token": false` in the service configuration to open the dashboard without a token. The initial fleet target is zero; use the dashboard to start workers. Keep the token out of Git and chat. An operator-managed TLS ingress or authenticated tunnel can also front the dashboard.
 
 The starting headless profile uses an explicit CPU/memory limit and software rendering thread budget. Size against **measured client and server tick health**, including rendering, server, proxy, and supervisor costs. A process being alive is insufficient. The shipped worker ceiling is deliberately one; raise it only after running capacity tests on the deployment host.
 

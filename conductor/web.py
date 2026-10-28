@@ -269,6 +269,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(data)
 
     def authenticated(self):
+        if self.server.token is None: return True
         bearer = self.headers.get('Authorization', '')
         if bearer.startswith('Bearer ') and hmac.compare_digest(bearer[7:].encode(), self.server.token.encode()): return True
         cookies = dict(pair.strip().split('=', 1) for pair in self.headers.get('Cookie', '').split(';') if '=' in pair)
@@ -304,7 +305,9 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/api/'):
                 if not self.authenticated(): return self.json({'error': 'Authentication required'}, 401)
                 service = self.server.service
-                if path == '/api/state': return self.json(service.snapshot())
+                if path == '/api/state':
+                    cookie = 'conductor_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' if self.server.token is None else None
+                    return self.json({**service.snapshot(), 'authRequired': self.server.token is not None}, cookie=cookie)
                 if path == '/api/reconcile/wait':
                     query = parse_qs(parsed.query)
                     values = query.get('after', [])
@@ -355,6 +358,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self.origin_ok(): return self.json({'error': 'Origin rejected'}, 403)
             if path == '/api/session':
+                if self.server.token is None: return self.json({'error': 'Authentication is disabled'}, 404)
                 # Rate-limit failed login attempts without retaining submitted tokens.
                 now = time.time(); ip = self.client_address[0]
                 with self.server.session_lock:
@@ -410,7 +414,7 @@ def load_token(path: Path) -> str:
 SERVICE_CONFIG_KEYS = {'max_buffer_bytes', 'enabled_tasks', 'canary_tasks', 'max_active_canaries',
                        'catalog_dir', 'delivery_retry_seconds', 'spool_success_days', 'spool_failure_days',
                        'central_diagnostic_days', 'central_failure_days', 'workspace_success_days',
-                       'workspace_failure_days', 'max_central_bytes', 'compact_retention'}
+                       'workspace_failure_days', 'max_central_bytes', 'compact_retention', 'require_token'}
 
 
 def scheduler_from_config(config_data, config):
@@ -453,13 +457,15 @@ def serve(config_path, host='0.0.0.0', port=8080, token_file=None):
                           ('spool_success_days', 7), ('spool_failure_days', 30),
                           ('central_diagnostic_days', 30), ('central_failure_days', 90),
                           ('workspace_success_days', 1), ('workspace_failure_days', 7)]})
+    require_token = config_data.get('require_token', True)
+    if not isinstance(require_token, bool): raise ValueError('require_token must be a boolean')
     token_path = Path(token_file or config.state_dir / 'dashboard.token')
-    token = load_token(token_path)
+    token = load_token(token_path) if require_token else None
     server = Server((host, int(port)), service, token)
     def stop(*_): threading.Thread(target=server.shutdown, daemon=True).start()
     signal.signal(signal.SIGTERM, stop); signal.signal(signal.SIGINT, stop)
     service.start()
-    print(f'Vibrato Conductor: http://{host}:{server.server_port}/ — access token file: {token_path}', flush=True)
+    print(f'Vibrato Conductor: http://{host}:{server.server_port}/' + (f' — access token file: {token_path}' if require_token else ''), flush=True)
     try: server.serve_forever(poll_interval=0.5)
     finally:
         server.server_close()

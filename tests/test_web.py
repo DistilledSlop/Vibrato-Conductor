@@ -142,6 +142,24 @@ class WebTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(result[0][0], 503)
 
+    def test_token_free_dashboard_state_controls_and_reconcile_wait(self):
+        self.server.token = None
+        status, _, html = self.request('/')
+        self.assertEqual(status, 200)
+        self.assertNotIn(self.token.encode(), html)
+        status, _, raw = self.request('/api/state')
+        self.assertEqual(status, 200)
+        self.assertFalse(json.loads(raw)['authRequired'])
+        self.assertNotIn(self.token.encode(), raw)
+        self.assertEqual(self.request('/api/fleet', {'desired': 2})[0], 200)
+        self.assertEqual(self.fleet.target, 2)
+        self.assertEqual(self.request('/api/fleet', {'desired': 1}, headers={'Origin': 'https://untrusted.example'})[0], 403)
+        self.service.tick()
+        status, _, raw = self.request('/api/reconcile/wait?after=0')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(raw)['generation'], 1)
+        self.assertEqual(self.request('/api/session', {'token': self.token})[0], 404)
+
     def test_static_console_and_token_file_permissions(self):
         status,headers,data=self.request('/')
         self.assertEqual(status,200);self.assertIn('Live worker gallery',data.decode())

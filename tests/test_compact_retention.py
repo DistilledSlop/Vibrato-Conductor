@@ -370,6 +370,13 @@ class CompactRetentionTests(unittest.TestCase):
                 serve(config); serve(config)
             saved = json.loads((root / 'state/compact-retention.json').read_text())['afterWall']
             self.assertEqual(cutoffs, [saved, saved])
+            (root / 'state/dashboard.token').unlink()
+            data = json.loads(config.read_text()); data['require_token'] = False; atomic_json(config, data)
+            with patch('conductor.fleet.Fleet'), patch('conductor.web.scheduler_from_config'), \
+                 patch('conductor.web.Service', FakeService), patch('conductor.web.Server', FakeServer), \
+                 patch('conductor.web.signal.signal'), patch('builtins.print'):
+                serve(config)
+            self.assertFalse((root / 'state/dashboard.token').exists())
 
     def test_service_cutoff_keeps_earlier_and_unknown_runs_full(self):
         with tempfile.TemporaryDirectory() as tmp:
