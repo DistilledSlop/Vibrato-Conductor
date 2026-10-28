@@ -165,11 +165,14 @@ class Test:
         self.api('/api/fleet', {'desired': 0})
         self.wait(lambda: self.api()['counts']['active'] == 0, 'scale to zero', timeout=180)
         self.record('scale_zero_drains_workers')
-        self.wait(lambda: all((STATE/'dataset'/rid/'manifest.json').is_file() for rid in (first_id, second_id)),
+        # Continuous replenishment may schedule the next worker before our completion poll.
+        # Every run launched by this exercise must retain evidence, including that drained run.
+        run_ids = [w['runId'] for w in self.api()['workers'] if w['createdWall'] >= first['createdWall']]
+        self.wait(lambda: all((STATE/'dataset'/rid/'manifest.json').is_file() for rid in run_ids),
                   'interrupted and completed artifacts centrally delivered', timeout=120)
-        for run_id in (first_id, second_id):
+        for run_id in run_ids:
             verify_manifest(STATE / 'dataset' / run_id)
-        self.record('interrupted_evidence_and_success_delivered', runIds=[first_id, second_id])
+        self.record('interrupted_evidence_and_success_delivered', runIds=run_ids)
         after = {str(p.relative_to(bank)): digest(p) for p in bank.rglob('*') if p.is_file()}
         assert before == after, 'World bank changed during Kubernetes tests'
         self.record('world_bank_immutable', files=len(before))
