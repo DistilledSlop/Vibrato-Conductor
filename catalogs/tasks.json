@@ -1241,7 +1241,9 @@
         "grindstone"
       ],
       "supported": true,
-      "requiresTags": [],
+      "requiresTags": [
+        "pre-enchanted-input"
+      ],
       "description": "Perform one focused grindstone goal with finite prerequisites and goal-scoped action/outcome evidence",
       "family": "enchanting",
       "gamemode": "survival",
@@ -1402,7 +1404,9 @@
         "ride_vehicle"
       ],
       "supported": true,
-      "requiresTags": [],
+      "requiresTags": [
+        "water-crossing"
+      ],
       "description": "Perform one focused ride_vehicle goal with finite prerequisites and goal-scoped action/outcome evidence",
       "family": "vehicles",
       "gamemode": "survival",
