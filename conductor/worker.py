@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .storage import atomic_json, artifact_manifest, stage_world
 from .evidence import snapshot_world
-from .diagnostics import IntervalRate, Watchdog, task_success, script_failure_reason, native_thread_failure
+from .diagnostics import IntervalRate, Watchdog, task_success, script_failure_reason, native_thread_failure, focused_activity_confirmed
 
 
 def number(env: dict, key: str, default: float, minimum: float, maximum: float) -> float:
@@ -456,6 +456,9 @@ class Worker:
                                     '-Dvibrato.screenshots=' + str(self.config.screenshots).lower(),
                                     '-Dvibrato.screenshotIntervalSeconds=' + str(self.config.screenshot_seconds),
                                     '-Dvibrato.serverTelemetryFile=' + str(self.root / 'server-heartbeat.json')]
+        if self.config.task.startswith('@activity '):
+            options['jvmArguments'] += ['-Dvibrato.packetCoverage=true',
+                                        '-Dvibrato.packetCoverageFile=' + str(client / 'packet-coverage.json')]
         argv = mll.command.get_minecraft_command(metadata['versions']['profile'], '/opt/game/minecraft', options)
         self.spawn('client', argv, client)
 
@@ -577,7 +580,7 @@ class Worker:
         self.sample_resources()
         failure = self.infrastructure_failure()
         if failure: reason = failure
-        for name in ['script-result.json', 'campaign-heartbeat.json', 'scenario-result.json']:
+        for name in ['script-result.json', 'campaign-heartbeat.json', 'scenario-result.json', 'activity-result.json', 'packet-coverage.json']:
             source = self.root / 'client' / name
             if source.exists(): shutil.copyfile(source, self.artifacts / name)
         self.copy_screenshot(self.root / 'client')
@@ -600,6 +603,11 @@ class Worker:
                     or scenario.get('evidence', {}).get('serverConfirmed') is not True):
                 success = False; ok = False
                 if reason == 'client_finished': reason = 'scenario_unconfirmed'
+        if self.config.task.startswith('@activity '):
+            activity = self.read_json(self.artifacts / 'activity-result.json') or {}
+            if not focused_activity_confirmed(self.config.task, activity):
+                success = False; ok = False
+                if reason == 'client_finished': reason = 'focused_activity_unconfirmed'
         if reason != 'client_finished' or not script_ok: success = False if self.config.task != 'director' else None
         context_valid = bool(self.last_client and self.last_client.get('actualMode') == self.config.gamemode
                              and self.last_client.get('serverMode') == self.config.gamemode

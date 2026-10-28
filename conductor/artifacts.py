@@ -14,10 +14,10 @@ import uuid
 from pathlib import Path
 
 from .storage import IDENTIFIER, atomic_json, digest, verify_manifest
-from .diagnostics import native_thread_failure
+from .diagnostics import native_thread_failure, focused_activity_confirmed
 
 
-QUALITY_POLICY_VERSION = 2
+QUALITY_POLICY_VERSION = 3
 
 
 def capture_integrity(root: Path) -> bool:
@@ -61,6 +61,11 @@ def quality_report(root: Path) -> dict:
                     reasons.append('worker_native_thread_exhausted')
                     break
                 overlap = data[-1024:]
+    assignment = metadata.get('assignment', '')
+    if isinstance(assignment, str) and assignment.startswith('@activity '):
+        try: activity = json.loads((root / 'activity-result.json').read_text())
+        except (OSError, ValueError): activity = None
+        if not focused_activity_confirmed(assignment, activity): reasons.append('focused_activity_goal_unconfirmed')
     if metadata.get('mode') != 'collection': reasons.append('diagnostic_mode')
     if result.get('diagnosticPassed') is not True: reasons.append('diagnostic_failed')
     if result.get('taskSuccess') is not True: reasons.append('task_success_unconfirmed')

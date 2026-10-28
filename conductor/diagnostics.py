@@ -230,3 +230,24 @@ def script_failure_reason(task, script):
         if any(o.get('status') == 'cancelled' for o in outcomes): return 'task_cancelled'
         if task_success(task, script) is not True: return 'task_success_unconfirmed'
     return None
+
+
+def focused_activity_confirmed(task, activity):
+    """A completed wrapper needs its specific goal/action proof, not merely a dispatched command."""
+    if not isinstance(task, str) or not task.startswith('@activity ') or not isinstance(activity, dict): return False
+    if (activity.get('activity') != task.split(' ', 1)[1] or activity.get('source') != 'focused_activity_task'
+            or activity.get('status') != 'completed'): return False
+    start, end = activity.get('goalStartedWall'), activity.get('goalFinishedWall')
+    if not finite(start) or not finite(end) or start <= 0 or end < start: return False
+    evidence = activity.get('evidence')
+    if not isinstance(evidence, dict) or not isinstance(evidence.get('mechanics'), list): return False
+    for event in evidence['mechanics']:
+        if (not isinstance(event, dict) or not event.get('id') or event.get('actionObserved') is not True
+                or event.get('goalTaskFinished') is not True or event.get('success') is not True): continue
+        if event.get('source') == 'server_observer' and event.get('serverConfirmed') is True: return True
+        if event.get('source') != 'client_action_and_task_outcome': continue
+        packets = event.get('packetDeltas')
+        if isinstance(packets, dict) and any(key.startswith('SERVERBOUND:') and isinstance(count, int)
+                and not isinstance(count, bool) and count > 0 for key, count in packets.items() if isinstance(key, str)):
+            return True
+    return False

@@ -805,6 +805,609 @@
       "gamemode": "survival",
       "operator": false,
       "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-organize-inventory",
+      "command": "@activity organize_inventory",
+      "activity": "organize_inventory",
+      "seconds": 600,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:15"
+      ],
+      "mechanics": [
+        "inventory_organize"
+      ],
+      "supported": true,
+      "requiresTags": [
+        "inventory-sort-kit"
+      ],
+      "description": "Perform one focused inventory_organize goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "inventory",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-chest-store-items",
+      "command": "@activity chest_store_items",
+      "activity": "chest_store_items",
+      "seconds": 1500,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:15",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "container_deposit"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused container_deposit goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "containers",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-inventory-stash-items",
+      "command": "@activity inventory_stash_items",
+      "activity": "inventory_stash_items",
+      "seconds": 1200,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:15",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "container_deposit"
+      ],
+      "supported": true,
+      "requiresTags": [
+        "inventory-with-loot",
+        "storage-chest"
+      ],
+      "description": "Perform one focused container_deposit goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "containers",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-place-chest-and-stash",
+      "command": "@activity place_chest_and_stash",
+      "activity": "place_chest_and_stash",
+      "seconds": 1200,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:15",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "container_deposit"
+      ],
+      "supported": true,
+      "requiresTags": [
+        "inventory-with-loot"
+      ],
+      "description": "Perform one focused container_deposit goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "containers",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-stash-valuables",
+      "command": "@activity stash_valuables",
+      "activity": "stash_valuables",
+      "seconds": 1200,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:15",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "container_deposit"
+      ],
+      "supported": true,
+      "requiresTags": [
+        "inventory-with-loot"
+      ],
+      "description": "Perform one focused container_deposit goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "containers",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-loot-nearby-chests",
+      "command": "@activity loot_nearby_chests",
+      "activity": "loot_nearby_chests",
+      "seconds": 1200,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:15",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "container_withdraw"
+      ],
+      "supported": true,
+      "requiresTags": [
+        "loot-chests"
+      ],
+      "description": "Perform one focused container_withdraw goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "containers",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-loot-chests",
+      "command": "@activity loot_chests",
+      "activity": "loot_chests",
+      "seconds": 1200,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:15",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "container_withdraw"
+      ],
+      "supported": true,
+      "requiresTags": [
+        "loot-chests"
+      ],
+      "description": "Perform one focused container_withdraw goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "containers",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-smelt-iron-ingot",
+      "command": "@activity smelt_iron_ingot",
+      "activity": "smelt_iron_ingot",
+      "seconds": 1800,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "smelt"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused smelt goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "smelting",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-smelt-gold-ingot",
+      "command": "@activity smelt_gold_ingot",
+      "activity": "smelt_gold_ingot",
+      "seconds": 1800,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "smelt"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused smelt goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "smelting",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-smelt-glass",
+      "command": "@activity smelt_glass",
+      "activity": "smelt_glass",
+      "seconds": 1800,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "smelt"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused smelt goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "smelting",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-smelt-charcoal",
+      "command": "@activity smelt_charcoal",
+      "activity": "smelt_charcoal",
+      "seconds": 1800,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "smelt"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused smelt goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "smelting",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-fish",
+      "command": "@activity fish",
+      "activity": "fish",
+      "seconds": 3600,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:1",
+        "packet:play:clientbound:66",
+        "packet:play:clientbound:88",
+        "packet:play:clientbound:31",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:104",
+        "packet:play:serverbound:57"
+      ],
+      "mechanics": [
+        "fish"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused fish goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "fishing",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-trade-for-item",
+      "command": "@activity trade_for_item",
+      "activity": "trade_for_item",
+      "seconds": 3600,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:clientbound:45",
+        "packet:play:clientbound:92",
+        "packet:play:serverbound:45",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:22"
+      ],
+      "mechanics": [
+        "trade"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused trade goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "trading",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-trade-for-enchanted-book",
+      "command": "@activity trade_for_enchanted_book",
+      "activity": "trade_for_enchanted_book",
+      "seconds": 3600,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:clientbound:45",
+        "packet:play:clientbound:92",
+        "packet:play:serverbound:45",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:22"
+      ],
+      "mechanics": [
+        "trade"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused trade goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "trading",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-enchant-item",
+      "command": "@activity enchant_item",
+      "activity": "enchant_item",
+      "seconds": 3600,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:clientbound:92",
+        "packet:play:clientbound:104",
+        "packet:play:serverbound:13",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "enchant"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused enchant goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "enchanting",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-anvil-rename",
+      "command": "@activity anvil_rename",
+      "activity": "anvil_rename",
+      "seconds": 2400,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:clientbound:92",
+        "packet:play:clientbound:8",
+        "packet:play:serverbound:42",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "anvil_rename"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused anvil_rename goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "enchanting",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-grindstone-disenchant",
+      "command": "@activity grindstone_disenchant",
+      "activity": "grindstone_disenchant",
+      "seconds": 3600,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:19",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:51",
+        "packet:play:clientbound:92",
+        "packet:play:clientbound:2",
+        "packet:play:serverbound:14",
+        "packet:play:serverbound:56"
+      ],
+      "mechanics": [
+        "grindstone"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused grindstone goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "enchanting",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-slay-mob",
+      "command": "@activity slay_mob",
+      "activity": "slay_mob",
+      "seconds": 1800,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:26",
+        "packet:play:clientbound:36",
+        "packet:play:clientbound:3",
+        "packet:play:clientbound:31",
+        "packet:play:clientbound:88",
+        "packet:play:clientbound:91",
+        "packet:play:clientbound:66",
+        "packet:play:clientbound:2",
+        "packet:play:serverbound:22",
+        "packet:play:serverbound:54"
+      ],
+      "mechanics": [
+        "attack_entity"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused attack_entity goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "combat",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-breed-animals",
+      "command": "@activity breed_animals",
+      "activity": "breed_animals",
+      "seconds": 2400,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:88",
+        "packet:play:clientbound:31",
+        "packet:play:clientbound:1",
+        "packet:play:clientbound:2",
+        "packet:play:clientbound:21",
+        "packet:play:serverbound:22",
+        "packet:play:serverbound:57"
+      ],
+      "mechanics": [
+        "breed_animal"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused breed_animal goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "farming",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-farm-crop",
+      "command": "@activity farm_crop",
+      "activity": "farm_crop",
+      "seconds": 3600,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:9",
+        "packet:play:clientbound:73",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:104",
+        "packet:play:serverbound:36",
+        "packet:play:serverbound:56",
+        "packet:play:serverbound:54"
+      ],
+      "mechanics": [
+        "farm_crop"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused farm_crop goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "farming",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-build-hut",
+      "command": "@activity build_hut",
+      "activity": "build_hut",
+      "seconds": 2400,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:9",
+        "packet:play:clientbound:73",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:7",
+        "packet:play:serverbound:56",
+        "packet:play:serverbound:54",
+        "packet:play:serverbound:47"
+      ],
+      "mechanics": [
+        "place_block"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused place_block goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "building",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-build-wall",
+      "command": "@activity build_wall",
+      "activity": "build_wall",
+      "seconds": 2400,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:9",
+        "packet:play:clientbound:73",
+        "packet:play:clientbound:21",
+        "packet:play:clientbound:7",
+        "packet:play:serverbound:56",
+        "packet:play:serverbound:54",
+        "packet:play:serverbound:47"
+      ],
+      "mechanics": [
+        "place_block"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused place_block goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "building",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "mechanic-travel-boat-cross",
+      "command": "@activity travel_boat_cross",
+      "activity": "travel_boat_cross",
+      "seconds": 2400,
+      "targets": [],
+      "packet_targets": [
+        "packet:play:clientbound:89",
+        "packet:play:clientbound:88",
+        "packet:play:clientbound:47",
+        "packet:play:clientbound:46",
+        "packet:play:clientbound:72",
+        "packet:play:clientbound:90",
+        "packet:play:serverbound:30",
+        "packet:play:serverbound:31",
+        "packet:play:serverbound:38"
+      ],
+      "mechanics": [
+        "ride_vehicle"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Perform one focused ride_vehicle goal with finite prerequisites and goal-scoped action/outcome evidence",
+      "family": "vehicles",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
     }
   ]
 }

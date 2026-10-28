@@ -167,3 +167,18 @@ class DiagnosticTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main()
+
+
+class FocusedEvidenceTests(unittest.TestCase):
+    def test_goal_requires_scoped_action_proof_and_valid_time_interval(self):
+        from conductor.diagnostics import focused_activity_confirmed
+        event={'id':'smelt','actionObserved':True,'goalTaskFinished':True,'success':True,
+               'source':'client_action_and_task_outcome','packetDeltas':{'SERVERBOUND:container_click':2}}
+        activity={'activity':'smelt_glass','source':'focused_activity_task','status':'completed',
+                  'goalStartedWall':100,'goalFinishedWall':110,'evidence':{'mechanics':[event]}}
+        self.assertTrue(focused_activity_confirmed('@activity smelt_glass', activity))
+        for invalid in ({**activity,'activity':'fish'}, {**activity,'goalFinishedWall':99},
+                        {**activity,'evidence':{'mechanics':[]}},
+                        {**activity,'evidence':{'mechanics':[{**event,'packetDeltas':{}}]}},
+                        {**activity,'evidence':{'mechanics':[{**event,'goalTaskFinished':False}]}}):
+            self.assertFalse(focused_activity_confirmed('@activity smelt_glass', invalid))

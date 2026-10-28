@@ -549,7 +549,7 @@ class CoverageInventory:
                 actual = by_task.get(task_id, {})
                 requested = task.get('packet_targets', [])
                 task_packets.append({'taskId': task_id, 'family': task.get('family'),
-                    'packetTargets': requested, 'targetedObserved': [identifier for identifier in requested if identifier in actual],
+                    'mechanics': task.get('mechanics', []), 'packetTargets': requested, 'targetedObserved': [identifier for identifier in requested if identifier in actual],
                     'rawPacketTypesObserved': len(actual),
                     'packets': [{**value, 'readerTier': self.model_packets[identifier]['tier'],
                                  'modelRole': self.model_packets[identifier]['role']}

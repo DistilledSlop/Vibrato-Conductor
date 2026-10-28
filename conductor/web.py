@@ -148,7 +148,12 @@ class Service:
         state['controller'] = controller
         if inventory is None and self.coverage is not None: inventory = self.coverage.snapshot()
         if inventory is not None:
-            state['coverage'] = {k: v for k, v in inventory.items() if k not in ('targets', 'missing', 'unsupported')}
+            state['coverage'] = {k: v for k, v in inventory.items() if k not in ('targets', 'missing', 'unsupported', 'modelPacketCoverage')}
+            model = inventory.get('modelPacketCoverage', {})
+            state['coverage']['modelPacketCoverage'] = {
+                **{key: model.get(key, 0) for key in ('requested', 'observed', 'missing')},
+                **{role: {key: model.get(role, {}).get(key, 0) for key in ('requested', 'observed', 'missing')}
+                   for role in ('output', 'input')}}
         if self.artifacts is not None: state['storage'] = self.artifacts.snapshot()
         admissions = {row['run_id']: row.get('quality') for row in state.get('storage', {}).get('runs', [])}
         for worker in state.get('workers', []):
@@ -157,6 +162,13 @@ class Service:
             worker['liveHealth'] = read_json(path / 'health.json')
             worker['heartbeat'] = read_json(path / 'heartbeat.json')
             worker['result'] = read_json(path / 'result.json', worker.get('result'))
+            if worker['state'] == 'failed':
+                if worker.get('reason') == 'worker_failed' and worker.get('result'):
+                    worker['reason'] = worker['result'].get('reason', worker['reason'])
+                script = read_json(path / 'script-result.json', {}) or {}
+                failures = [outcome.get('failureReason') for outcome in script.get('taskOutcomes', [])
+                            if outcome.get('status') == 'failed' and outcome.get('failureReason')]
+                if failures: worker['failureDetail'] = failures[-1]
             worker['screenshot'] = (path / 'screenshot.png').is_file()
         return state
 
