@@ -12,7 +12,8 @@
       "description": "Seeded autonomous activities",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "exploration"
     },
     {
       "id": "nether",
@@ -24,7 +25,8 @@
       "description": "Enter the Nether; authoritative dimension outcome required",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "progression"
     },
     {
       "id": "gamer",
@@ -36,7 +38,8 @@
       "description": "Beat the game; authoritative task outcome required",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "progression"
     },
     {
       "id": "get-oak_log",
@@ -50,7 +53,8 @@
       "description": "Obtain one oak_log through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "gather"
     },
     {
       "id": "get-spruce_log",
@@ -64,7 +68,8 @@
       "description": "Obtain one spruce_log through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "gather"
     },
     {
       "id": "get-birch_log",
@@ -78,7 +83,8 @@
       "description": "Obtain one birch_log through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "gather"
     },
     {
       "id": "get-dirt",
@@ -92,7 +98,8 @@
       "description": "Obtain one dirt through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "gather"
     },
     {
       "id": "get-sand",
@@ -106,7 +113,8 @@
       "description": "Obtain one sand through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "gather"
     },
     {
       "id": "get-cobblestone",
@@ -120,7 +128,8 @@
       "description": "Obtain one cobblestone through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "mining"
     },
     {
       "id": "get-coal",
@@ -134,7 +143,8 @@
       "description": "Obtain one coal through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "mining"
     },
     {
       "id": "get-iron_ingot",
@@ -148,7 +158,8 @@
       "description": "Obtain one iron_ingot through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "mining"
     },
     {
       "id": "get-crafting_table",
@@ -162,7 +173,8 @@
       "description": "Obtain one crafting_table through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "craft"
     },
     {
       "id": "get-wooden_pick",
@@ -176,7 +188,8 @@
       "description": "Obtain one wooden_pickaxe through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "tools"
     },
     {
       "id": "get-furnace",
@@ -190,7 +203,8 @@
       "description": "Obtain one furnace through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "craft"
     },
     {
       "id": "get-torch",
@@ -204,7 +218,8 @@
       "description": "Obtain one torch through the existing item task catalogue",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "craft"
     },
     {
       "id": "observe-mobs",
@@ -218,7 +233,8 @@
       "description": "Autonomous activities in a bank world surveyed for mob observations",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "exploration"
     },
     {
       "id": "protocol-fixture-suite",
@@ -232,7 +248,8 @@
       "unsupportedReason": "Requires a separately validated fixture server/mod image; ordinary workers do not contain it",
       "gamemode": "survival",
       "operator": false,
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "protocol"
     },
     {
       "id": "creative_inventory",
@@ -248,7 +265,8 @@
       "operator": false,
       "scenario": "creative_inventory",
       "description": "Verify creative inventory changes against the server observer",
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "creative"
     },
     {
       "id": "creative_build",
@@ -264,7 +282,8 @@
       "operator": false,
       "scenario": "creative_build",
       "description": "Place and break blocks through creative-mode client actions",
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "creative"
     },
     {
       "id": "adventure_inspect",
@@ -280,7 +299,8 @@
       "operator": false,
       "scenario": "adventure_inspect",
       "description": "Inspect Adventure restrictions using attempted interactions and server state",
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "adventure"
     },
     {
       "id": "spectator_explore",
@@ -296,7 +316,8 @@
       "operator": false,
       "scenario": "spectator_explore",
       "description": "Explore through spectator movement and verify server-observed movement",
-      "operatorLevel": 2
+      "operatorLevel": 2,
+      "family": "spectator"
     },
     {
       "id": "operator_commands",
@@ -312,6 +333,477 @@
       "operator": true,
       "scenario": "operator_commands",
       "description": "Exercise permission-level-two commands with confirmed server outcomes",
+      "operatorLevel": 2,
+      "family": "operator"
+    },
+    {
+      "id": "get-oak_planks-16",
+      "command": "@get oak_planks 16",
+      "seconds": 360,
+      "targets": [
+        "item:minecraft:oak_planks"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 16 oak_planks through the existing resource task; completion requires the actual task outcome",
+      "family": "craft",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-stick-16",
+      "command": "@get stick 16",
+      "seconds": 360,
+      "targets": [
+        "item:minecraft:stick"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 16 stick through the existing resource task; completion requires the actual task outcome",
+      "family": "craft",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-chest-1",
+      "command": "@get chest 1",
+      "seconds": 480,
+      "targets": [
+        "item:minecraft:chest"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 chest through the existing resource task; completion requires the actual task outcome",
+      "family": "craft",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-barrel-1",
+      "command": "@get barrel 1",
+      "seconds": 600,
+      "targets": [
+        "item:minecraft:barrel"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 barrel through the existing resource task; completion requires the actual task outcome",
+      "family": "craft",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-ladder-8",
+      "command": "@get ladder 8",
+      "seconds": 480,
+      "targets": [
+        "item:minecraft:ladder"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 8 ladder through the existing resource task; completion requires the actual task outcome",
+      "family": "craft",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-oak_door-1",
+      "command": "@get oak_door 1",
+      "seconds": 480,
+      "targets": [
+        "item:minecraft:oak_door"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 oak_door through the existing resource task; completion requires the actual task outcome",
+      "family": "craft",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-glass-8",
+      "command": "@get glass 8",
+      "seconds": 900,
+      "targets": [
+        "item:minecraft:glass"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 8 glass through the existing resource task; completion requires the actual task outcome",
+      "family": "craft",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-stone-16",
+      "command": "@get stone 16",
+      "seconds": 900,
+      "targets": [
+        "item:minecraft:stone"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 16 stone through the existing resource task; completion requires the actual task outcome",
+      "family": "mining",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-charcoal-8",
+      "command": "@get charcoal 8",
+      "seconds": 900,
+      "targets": [
+        "item:minecraft:charcoal"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 8 charcoal through the existing resource task; completion requires the actual task outcome",
+      "family": "mining",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-bucket-1",
+      "command": "@get bucket 1",
+      "seconds": 1200,
+      "targets": [
+        "item:minecraft:bucket"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 bucket through the existing resource task; completion requires the actual task outcome",
+      "family": "equipment",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-shears-1",
+      "command": "@get shears 1",
+      "seconds": 1200,
+      "targets": [
+        "item:minecraft:shears"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 shears through the existing resource task; completion requires the actual task outcome",
+      "family": "tools",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-oak_boat-1",
+      "command": "@get oak_boat 1",
+      "seconds": 600,
+      "targets": [
+        "item:minecraft:oak_boat"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 oak_boat through the existing resource task; completion requires the actual task outcome",
+      "family": "craft",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-stone_pickaxe-1",
+      "command": "@get stone_pickaxe 1",
+      "seconds": 600,
+      "targets": [
+        "item:minecraft:stone_pickaxe"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 stone_pickaxe through the existing resource task; completion requires the actual task outcome",
+      "family": "tools",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-stone_axe-1",
+      "command": "@get stone_axe 1",
+      "seconds": 600,
+      "targets": [
+        "item:minecraft:stone_axe"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 stone_axe through the existing resource task; completion requires the actual task outcome",
+      "family": "tools",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-stone_shovel-1",
+      "command": "@get stone_shovel 1",
+      "seconds": 600,
+      "targets": [
+        "item:minecraft:stone_shovel"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 stone_shovel through the existing resource task; completion requires the actual task outcome",
+      "family": "tools",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-iron_pickaxe-1",
+      "command": "@get iron_pickaxe 1",
+      "seconds": 1500,
+      "targets": [
+        "item:minecraft:iron_pickaxe"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 iron_pickaxe through the existing resource task; completion requires the actual task outcome",
+      "family": "tools",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-iron_axe-1",
+      "command": "@get iron_axe 1",
+      "seconds": 1500,
+      "targets": [
+        "item:minecraft:iron_axe"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 iron_axe through the existing resource task; completion requires the actual task outcome",
+      "family": "tools",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-stone_sword-1",
+      "command": "@get stone_sword 1",
+      "seconds": 600,
+      "targets": [
+        "item:minecraft:stone_sword"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 stone_sword through the existing resource task; completion requires the actual task outcome",
+      "family": "equipment",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-shield-1",
+      "command": "@get shield 1",
+      "seconds": 1200,
+      "targets": [
+        "item:minecraft:shield"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 shield through the existing resource task; completion requires the actual task outcome",
+      "family": "equipment",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-iron_chestplate-1",
+      "command": "@get iron_chestplate 1",
+      "seconds": 1800,
+      "targets": [
+        "item:minecraft:iron_chestplate"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 iron_chestplate through the existing resource task; completion requires the actual task outcome",
+      "family": "equipment",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-iron_helmet-1",
+      "command": "@get iron_helmet 1",
+      "seconds": 1500,
+      "targets": [
+        "item:minecraft:iron_helmet"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 iron_helmet through the existing resource task; completion requires the actual task outcome",
+      "family": "equipment",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-bread-3",
+      "command": "@get bread 3",
+      "seconds": 1200,
+      "targets": [
+        "item:minecraft:bread"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 3 bread through the existing resource task; completion requires the actual task outcome",
+      "family": "food",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-cooked_beef-3",
+      "command": "@get cooked_beef 3",
+      "seconds": 1200,
+      "targets": [
+        "item:minecraft:cooked_beef"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 3 cooked_beef through the existing resource task; completion requires the actual task outcome",
+      "family": "food",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-baked_potato-3",
+      "command": "@get baked_potato 3",
+      "seconds": 1200,
+      "targets": [
+        "item:minecraft:baked_potato"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 3 baked_potato through the existing resource task; completion requires the actual task outcome",
+      "family": "food",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-wheat-6",
+      "command": "@get wheat 6",
+      "seconds": 1200,
+      "targets": [
+        "item:minecraft:wheat"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 6 wheat through the existing resource task; completion requires the actual task outcome",
+      "family": "food",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-fishing_rod-1",
+      "command": "@get fishing_rod 1",
+      "seconds": 900,
+      "targets": [
+        "item:minecraft:fishing_rod"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 1 fishing_rod through the existing resource task; completion requires the actual task outcome",
+      "family": "tools",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "get-cod-3",
+      "command": "@get cod 3",
+      "seconds": 900,
+      "targets": [
+        "item:minecraft:cod"
+      ],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Obtain 3 cod through the existing resource task; completion requires the actual task outcome",
+      "family": "food",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "collect-food",
+      "command": "@food 32",
+      "seconds": 1200,
+      "targets": [],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Collect 32 food units through CollectFoodTask",
+      "family": "food",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "travel-origin",
+      "command": "@goto 0 0",
+      "seconds": 1200,
+      "targets": [],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Travel to overworld X0 Z0 from the saved spawn",
+      "family": "exploration",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "travel-east",
+      "command": "@goto 500 500",
+      "seconds": 1800,
+      "targets": [],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Travel to X500 Z500 from the saved spawn",
+      "family": "exploration",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "travel-west",
+      "command": "@goto -500 500",
+      "seconds": 1800,
+      "targets": [],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Travel to X-500 Z500 from the saved spawn",
+      "family": "exploration",
+      "gamemode": "survival",
+      "operator": false,
+      "operatorLevel": 2
+    },
+    {
+      "id": "locate-desert-temple",
+      "command": "@locate_structure DESERT_TEMPLE",
+      "seconds": 3600,
+      "targets": [],
+      "supported": true,
+      "requiresTags": [],
+      "description": "Locate a desert temple through the existing structure task; no surveyed location is assumed",
+      "family": "exploration",
+      "gamemode": "survival",
+      "operator": false,
       "operatorLevel": 2
     }
   ]
