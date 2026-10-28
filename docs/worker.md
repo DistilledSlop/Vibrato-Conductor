@@ -1,74 +1,42 @@
-# Single-worker runtime
+# Worker runtime
+
+Each isolated worker runs Xvfb/Mesa, the real Vibrato client, a lossless recording proxy, and its own Fabric server. It needs a virtual OpenGL display, but no physical monitor or video recording. Periodic PNG frames support the dashboard gallery. See [operations](operations.md) for fleet configuration and [telemetry](worker-telemetry.md) for measured fields and scenario commands.
 
 ## Build and identity
 
-`scripts/build-worker.py` stages an allowlist of inputs into `.state/build-context` before building `vibrato-worker:dev`. It never sends sibling saves, credentials, captures, or Git directories to Docker. Build metadata records commits, dirty status, SHA-256 for every staged input, and the exact built Vibrato jar. Rebuild the mod before building the worker after source changes.
+Build the sibling Vibrato project, including `conductor-telemetry`, before running `scripts/build-worker.py`. The builder stages an explicit allowlist; saves, credentials, captures, and Git directories never enter the build context. Build metadata records source commits, dirty status, every staged input hash, and the client/server-observer JARs. Record the Docker image ID alongside source identity.
 
-Minecraft, Fabric loader, and Fabric API versions come from Vibrato's `gradle.properties`. Fabric installer is pinned to 1.0.3, minecraft-launcher-lib to 8.0, and npm dependencies use the sibling proxy's lockfile. Ubuntu 24.04 and Node 22 base tags track their maintained images; record `docker image inspect` output for exact image identity. The installation step does not accept the EULA. Runtime requires explicit EULA and offline-mode flags.
+Minecraft/Fabric versions come from Vibrato's `gradle.properties`. Runtime dependency versions are pinned in the installer and proxy lockfile. Base image tags can move; the built image ID identifies the tested runtime. Building does not accept the EULA. Launches require explicit EULA/offline acceptance.
 
-The client always gets `vibrato.server=127.0.0.1:25566`; the recording proxy forwards to `127.0.0.1:25565`. Both listeners bind loopback inside the worker's namespace. Each client uses a deterministic offline username of at most 16 characters, with the full run identity and seed recorded separately. No fixture mods, operators, altered game rules, or optimization mods are installed. New worlds use normal survival settings.
+The client connects to the proxy on loopback port 25566, which forwards to its private server on 25565. Offline usernames are deterministic and limited to 16 characters. Every run records its full identity and seed. The server observer supplies authoritative ticks, mode, permissions, inventory, and controlled action evidence. Ordinary Survival assignments are non-operator; other modes and operator level require explicit scenario assignments. Optimization mods are optional experimental profiles and remain outside ordinary collection admission.
 
-## Storage
+## Worlds and storage
 
-A run id is exclusive. Reusing an existing workspace or artifact directory fails. Runs write isolated mutable server state below `.state/workspaces/ID/ID/`. The duplicate final ID is the worker's internal namespace below its mounted workspace.
+Every run ID is exclusive. Runtime and artifact directories cannot be reused. The bank is mounted read-only; each worker receives a private writable clone. Cloning prefers reflinks and requires explicit permission for full-copy fallback. Full content hashes identify the source and clone, with before/after checks against mutation. Sidecar metadata keeps the exact source seed and original mode separate from the assignment.
 
-Artifacts go to `.state/artifacts/ID/` by default. `--artifacts /mount/dataset` can point to a persistent shared filesystem. The artifact mount is independent of the disposable worker filesystem. Captures and logs stream directly into it; there is no upload step for this backend. Object storage, network outage retries, rotation into upload segments, and retention management are not yet implemented.
+Artifacts stream directly to a persistent spool independent of the disposable worker. Finalized manifests are published last and then remain immutable. The fleet delivery queue independently verifies and atomically publishes complete runs into `central_dir`, with durable retries, buffering limits, and protected retention. The selected backend is a filesystem mount; external object storage is not configured. See [operations](operations.md#artifact-delivery-and-retention).
 
-Retained artifacts include:
+Artifacts include metadata and input hashes, separate process logs, client/server heartbeats, cgroup resources, raw packet payloads and indexes, recorder flush markers, periodic screenshots, task/scenario outcomes, result, and checksummed manifest. Failed runs can also retain a bounded world archive. Use `python3 -m conductor verify PATH` to check integrity; integrity alone does not establish training eligibility.
 
-- `metadata.json`: assignment, seed, world identity, server properties, connection path, software versions, source revisions, and input hashes.
-- `logs/`: separate client, proxy, Fabric server, and Xvfb output.
-- `heartbeats.jsonl` and `heartbeat.json`: sampled client task leaf, position, dimension, health, deaths, and client tick cadence.
-- `resources.jsonl`: cgroup CPU, memory, memory events, and capture bytes. These include the display and server as well as the client.
-- `captures/`: original `.bin` payloads and reader-compatible `.jsonl` indexes, plus per-session `.status.json` flush markers.
-- `script-result.json`, `result.json`, and `manifest.json`: script results, worker classification, checksums, and a final artifact inventory.
+The proxy bounds queued bytes and raw session size and fails closed on recording errors. Worker disk budgets are sampled watchdog thresholds, rather than filesystem quotas. Docker/Kubernetes enforce CPU and memory limits. The tested profile uses 8 CPUs, 6 GiB, and `LP_NUM_THREADS=2`; workload and concurrency still require measured validation.
 
-A recorder marker is incomplete until its streams close successfully. A missing run manifest means finalization was interrupted. Verify completed artifacts with `python3 -m conductor verify PATH`. A valid manifest establishes file integrity, not training eligibility. `datasetEligible` is always false in this milestone, and `taskSuccess` remains unknown.
+## Health, outcomes, and shutdown
 
-The proxy caps queued recording data at 8 MiB and raw bytes per session at 1 GiB. Exceeding either fails the session and proxy instead of silently dropping captured data. The worker bounds total mutable file usage at 4 GiB by default, sampled every two seconds; this is a watchdog threshold, not a filesystem quota. Logs and world growth can overshoot between samples. Docker limits CPU, memory, PIDs, and shared memory; temporary display space has its own bound. `RUN_SECONDS` is a task budget, and startup has a separate deadline. The CLI stops containers with up to 90 seconds for ordered cleanup.
+Health requires game readiness, a warmup interval, fresh client/server heartbeats and capture evidence, and sufficient cumulative tick samples. Weighted counter deltas avoid sampling aliasing. Both client and server must sustain the admission threshold; process liveness alone cannot establish capacity. Raw loading and warmup samples remain available for diagnosis.
 
-## World bank
+Task success requires a completed assigned command and matching non-cancelled outcome. Long progression tasks additionally need their actual goal evidence. Capacity, exact mode/permissions, complete captures, software/world identity, and watchdog status are independently checked before collection admission. Failed, unknown, cancelled, overloaded, or experimental runs remain diagnostic evidence.
 
-Use this bank layout, mounted read-only:
+The watchdog distinguishes timing/resource pressure from semantic task stalls, bounded movement loops, repeated crafting restarts, and repeated failed pillaring. Mere stillness or navigation restarts do not prove failure. Inferred classifications remain labelled as inferred.
 
-```text
-bank/
-  forest-001/
-    world/
-      level.dat
-      region/
-      ...
-```
+SIGTERM stops the client, drains the proxy, sends server console `stop`, waits for the world save, and stops the display before publishing final artifacts. Stalled processes receive bounded signal escalation. SIGKILL cannot finalize evidence; the controller conservatively quarantines retained partial data after termination. Containers/Pods are cleaned only under owned scope and the configured verified-evidence retention policy. Controller restarts preserve workers for adoption.
 
-```bash
-python3 -m conductor run --id forest-probe-001 --seconds 120 \
-  --world-bank /mount/bank --world-id forest-001 \
-  --accept-eula --accept-offline --wait
-```
-
-World directories must have no symlinks or special files. Workers try `cp --reflink=always` and never write to the bank. Unsupported copy-on-write storage fails unless `--allow-world-copy` is passed. The metadata records copy mode, logical byte size, and the source `level.dat` hash. Full copies consume the whole world's logical size; they are not shared writable worlds. The bank must stay immutable throughout copying. A bank revision manifest covering every world file remains to be added; a `level.dat` hash alone does not identify every chunk.
-
-## Monitoring and cleanup
-
-```bash
-python3 -m conductor status
-python3 -m conductor stop vibrato-forest-probe-001
-```
-
-The stop command checks the conductor ownership label. Containers remain after exit for inspection. Once evidence has been verified and retained, remove an exited container with `docker rm NAME` and remove its workspace separately when no longer needed. The CLI never deletes bank worlds or artifacts. No background reconciliation or automatic replacements run yet.
-
-Docker health requires a recent supervisor update, client heartbeat, and capture growth. Process failures, missing heartbeats, capture stalls, exhausted startup/lifetime budgets, and local storage thresholds retain an explicit reason. SIGTERM stops the client, flushes the proxy, sends the server console `stop` command to save the world, and stops Xvfb. A stalled server then receives SIGTERM, followed by SIGKILL only after a further timeout. A passed diagnostic requires the client, proxy, and server to exit zero. SIGKILL cannot finalize artifacts; partial captures retain incomplete markers. The supervisor owns only its own process groups.
-
-Dedicated-server tick telemetry is currently absent: the existing client heartbeat reports null `serverTps` on multiplayer. Client tick cadence and cgroup samples cannot establish server capacity. No motion-only stall classifier is enabled. Nerd-pole failures, task loops, and semantic progress require additional instrumentation before automatic behavior diagnosis or training collection.
-
-## Tests
+## Checks
 
 ```bash
 python3 -m unittest discover -s tests -v
-# Host Node is optional; run the recorder's focused tests with Docker:
-docker run --rm --network none \
-  -v /opt/Protocol-Transformer/proxy:/proxy:ro -w /proxy \
-  node:22-bookworm-slim node --test test/recorder.test.js
+python3 scripts/test-worker-live.py --id fresh-probe-001 --task '@get dirt 1' \
+  --seconds 90 --mode collection --expect eligible --cpus 8 \
+  --accept-eula --accept-offline
 ```
 
-Use a fresh run id for every real smoke test. Inspect `result.json`, verify the artifact manifest, and confirm both C2S and S2C play packet observations. A duration-bound autonomous run tests the worker path and is not evidence that a long task succeeded.
+Use fresh run IDs and inspect the full result and manifest. A duration-bound autonomous diagnostic is not proof that its long-term goal completed. The [mode validation report](mode-validation-2026-10-27.md) records actual Creative, Survival, Adventure, Spectator, and operator results.
