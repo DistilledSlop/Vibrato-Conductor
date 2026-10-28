@@ -26,6 +26,7 @@ function numeric(obj, keys){for(const key of keys){const val=obj?.[key];if(typeo
 function tps(worker){const h=health(worker),b=heartbeat(worker);let server=numeric(h,['serverMeanTps','serverTps']);if(server===null)server=numeric(h.server||h.serverHealth,['tps','meanTps']);if(server===null)server=numeric(b,['serverTps']);let client=numeric(h,['clientMeanTps','clientTps']);if(client===null)client=numeric(b,['tps']);return {server,client};}
 function captureBytes(worker){const h=health(worker);return h.captureBytes??h.capture?.bytes??worker.result?.capture?.bytes??0;}
 function workerTask(worker){return worker.task||worker.assignment?.task||'Unassigned';}
+function taskSummary(worker){const hb=heartbeat(worker);if(worker.reason)return worker.reason.replaceAll('_',' ');if(worker.result?.taskSuccess===true)return 'Assigned task completed';if(hb.postTaskSettle===true)return 'Task completed · collecting final measurements';if(hb.leaf)return hb.leaf;if(hb.rootTask)return hb.rootTask;if(Number(hb.taskCompletedCount)>0)return 'No active task · task outcomes recorded';return 'Waiting for task telemetry';}
 function shortId(id){return id.length>23?id.slice(0,11)+'…'+id.slice(-8):id;}
 function selected(){return (state?.workers||[]).filter(w=>filter==='all'||(filter==='active'?activeStates.has(w.state):['unhealthy','failed','lost'].includes(w.state)));}
 function updateState(next){
@@ -55,7 +56,7 @@ function renderWorkers(){
   if(view==='gallery')for(const worker of workers){let ref=cardRefs.get(worker.runId);if(!ref){ref=createCard(worker);cardRefs.set(worker.runId,ref);$('gallery').append(ref.card);observer.observe(ref.card);}updateCard(ref,worker);}
   if(view==='table'){
     $('workers').replaceChildren();
-    for(const w of workers){const tr=make('tr');const name=make('td');name.append(make('span','mono',shortId(w.runId)),make('span','sub',w.worldId||'Generated world'));const status=make('td');status.append(pill(w.state));const task=make('td');task.append(make('span','mono',workerTask(w)),make('span','sub',heartbeat(w).leafClass||w.reason||'Awaiting task telemetry'));const game=make('td');const ts=tps(w);game.append(make('span','mono',ts.server===null?'Server TPS pending':`${ts.server.toFixed(1)} server TPS`),make('span','sub',ts.client===null?'Client pending':`${ts.client.toFixed(1)} client TPS`));const capture=make('td');capture.append(make('span','mono',bytes(captureBytes(w))),make('span','sub',`${age(w.createdWall)} runtime`));const action=make('td');const b=make('button','secondary','Inspect ↗');b.addEventListener('click',()=>openWorker(w.runId));action.append(b);tr.append(name,status,task,game,capture,action);$('workers').append(tr);}
+    for(const w of workers){const tr=make('tr');const name=make('td');name.append(make('span','mono',shortId(w.runId)),make('span','sub',w.worldId||'Generated world'));const status=make('td');status.append(pill(w.state));const task=make('td');task.append(make('span','mono',workerTask(w)),make('span','sub',taskSummary(w)));const game=make('td');const ts=tps(w);game.append(make('span','mono',ts.server===null?'Server TPS pending':`${ts.server.toFixed(1)} server TPS`),make('span','sub',ts.client===null?'Client pending':`${ts.client.toFixed(1)} client TPS`));const capture=make('td');capture.append(make('span','mono',bytes(captureBytes(w))),make('span','sub',`${age(w.createdWall)} runtime`));const action=make('td');const b=make('button','secondary','Inspect ↗');b.addEventListener('click',()=>openWorker(w.runId));action.append(b);tr.append(name,status,task,game,capture,action);$('workers').append(tr);}
   }
 }
 function createCard(w){
@@ -69,7 +70,7 @@ function createCard(w){
   return {card,image,status,stamp,runtime,world,task,leaf,metrics,lastFrame:0,worker:w};
 }
 function updateCard(ref,w){
-  ref.worker=w;ref.status.replaceChildren(pill(w.state));ref.runtime.textContent=age(w.createdWall);ref.world.textContent=(w.worldId||'Fresh generated world')+' · '+(w.gamemode||w.assignment?.gamemode||'survival')+(w.operator?' · operator':'');ref.task.textContent=workerTask(w);ref.leaf.textContent=heartbeat(w).leaf||w.reason||'Waiting for task telemetry';
+  ref.worker=w;ref.status.replaceChildren(pill(w.state));ref.runtime.textContent=age(w.createdWall);ref.world.textContent=(w.worldId||'Fresh generated world')+' · '+(w.gamemode||w.assignment?.gamemode||'survival')+(w.operator?' · operator':'');ref.task.textContent=workerTask(w);ref.leaf.textContent=taskSummary(w);
   const ts=tps(w);ref.metrics.replaceChildren();for(const [label,value] of [['TPS',ts.server===null?'—':ts.server.toFixed(1)],['CAPTURE',bytes(captureBytes(w))],['MEM',bytes(health(w).resources?.memoryBytes)]]){const n=make('span');n.append(make('span','',label+' '),make('strong','',value));ref.metrics.append(n);}
   if(w.screenshot&&visible.has(w.runId))refreshThumbnail(w.runId);
 }
@@ -88,7 +89,7 @@ async function refreshDetail(rebuild=false){
     const displayLabel=root.querySelector('.detail-controls>span');if(displayLabel)displayLabel.textContent=activeStates.has(w.state)?'Live display · refreshes every 15 seconds':'Retained diagnostic frame · worker has stopped';
     const image=$('detailFrame');image.hidden=!w.screenshot;if(w.screenshot)image.src=`/api/artifacts/${encodeURIComponent(id)}/screenshot.png?t=${Math.floor(Date.now()/15000)}`;
     const ts=tps(w),hb=heartbeat(w);$('detailMetrics').replaceChildren(detailMetric('STATUS',w.state),detailMetric('SERVER TPS',ts.server===null?'Pending':ts.server.toFixed(2)),detailMetric('CLIENT TPS',ts.client===null?'Pending':ts.client.toFixed(2)),detailMetric('RAW CAPTURE',bytes(captureBytes(w))),detailMetric('MEMORY',bytes(health(w).resources?.memoryBytes)),detailMetric('CPU USED',Number(health(w).resources?.cpuUsageSeconds||0).toFixed(1)+' core-seconds'));
-    $('detailTask').replaceChildren(make('h2','',workerTask(w)),make('p','',hb.leaf||w.reason||'No task state yet'),make('p','',`${w.worldId||'Generated world'} · seed ${w.seed} · ${hb.dimension||'dimension pending'} · ${age(w.createdWall)} runtime`));
+    $('detailTask').replaceChildren(make('h2','',workerTask(w)),make('p','',taskSummary(w)),make('p','',`${w.worldId||'Generated world'} · seed ${w.seed} · ${hb.dimension||'dimension pending'} · ${age(w.createdWall)} runtime`));
     await loadLogs(id);
   }catch(e){if(generation===detailGeneration)toast(e.message,true);}
 }
