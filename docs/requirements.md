@@ -1,3 +1,5 @@
+> Historical requirements and initial handoff snapshot. Statements about missing implementation or tests describe the starting state, not current status. See [README](../README.md), [operations](operations.md), and the validation reports for implemented behavior and measured limits.
+
 # Vibrato Conductor requirements
 
 Recorded on October 27, 2026, from the project discussion. This describes the system to build, rather than an implemented system.

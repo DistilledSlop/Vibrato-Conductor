@@ -26,7 +26,7 @@ Open **http://127.0.0.1:8080/**. Read the access-token file printed on startup a
 The starting headless profile uses an explicit CPU/memory limit and software rendering thread budget. Size against **measured client and server tick health**, including rendering, server, proxy, and supervisor costs. A process being alive is insufficient. The shipped worker ceiling is deliberately one; raise it only after running capacity tests on the deployment host.
 
 ```bash
-python3 -m conductor scale 2 --token-file .state/fleet/dashboard.token
+python3 -m conductor scale 1 --token-file .state/fleet/dashboard.token
 python3 -m conductor fleet-status --token-file .state/fleet/dashboard.token
 ```
 
