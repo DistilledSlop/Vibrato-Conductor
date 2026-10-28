@@ -1,12 +1,15 @@
 import http.cookiejar
+from contextlib import contextmanager
 import json
 import tempfile
+import time
 import threading
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from conductor.web import Server, Service, load_token
 
@@ -93,6 +96,52 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.fleet.reconciles,1)
         self.assertEqual(self.fleet.inhibited,'artifact_delivery_error')
         self.assertIn('storage unavailable',self.service.snapshot()['controller']['deliveryError'])
+    def test_reconcile_wait_requires_auth_and_only_successful_tick_wakes(self):
+        self.assertEqual(self.request('/api/reconcile/wait')[0], 401)
+        waiting = threading.Event(); result = []
+        original = self.service.wait_for_reconcile
+        def entered(after):
+            waiting.set()
+            return original(after)
+        with patch.object(self.service, 'wait_for_reconcile', side_effect=entered):
+            thread = threading.Thread(target=lambda: result.append(self.request('/api/reconcile/wait?after=0', auth=True)))
+            thread.start(); self.assertTrue(waiting.wait(2)); time.sleep(0.05)
+            with patch.object(self.fleet, 'reconcile', side_effect=RuntimeError('failed tick')):
+                self.service.tick()
+            self.assertFalse(result)
+            with patch.object(self.service, '_deliver', side_effect=OSError('delivery unavailable')):
+                self.service.tick()
+            self.assertFalse(result)
+            from conductor.artifacts import HistoryBusy
+            @contextmanager
+            def busy():
+                raise HistoryBusy('busy')
+                yield
+            with patch.object(self.service, 'artifacts', SimpleNamespace(history_guard=busy)):
+                self.service.tick()
+            self.assertFalse(result)
+            self.service.tick(); thread.join(2)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(result[0][0], 200)
+        self.assertEqual(json.loads(result[0][2])['generation'], 1)
+        status, _, body = self.request('/api/reconcile/wait?after=0', auth=True)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['generation'], 1)
+        self.assertEqual(self.request('/api/reconcile/wait?after=invalid', auth=True)[0], 400)
+
+    def test_reconcile_wait_ends_on_controller_shutdown(self):
+        waiting = threading.Event(); result = []
+        original = self.service.wait_for_reconcile
+        def entered(after):
+            waiting.set()
+            return original(after)
+        with patch.object(self.service, 'wait_for_reconcile', side_effect=entered):
+            thread = threading.Thread(target=lambda: result.append(self.request('/api/reconcile/wait?after=0', auth=True)))
+            thread.start(); self.assertTrue(waiting.wait(2)); time.sleep(0.05)
+            self.service.close(); thread.join(2)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(result[0][0], 503)
+
     def test_static_console_and_token_file_permissions(self):
         status,headers,data=self.request('/')
         self.assertEqual(status,200);self.assertIn('Live worker gallery',data.decode())

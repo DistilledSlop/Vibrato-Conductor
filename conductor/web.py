@@ -56,6 +56,8 @@ class Service:
         self.delivery_error = None
         self.stop_event = threading.Event()
         self.lock = threading.RLock()
+        self.reconcile_condition = threading.Condition(self.lock)
+        self.reconcile_generation = 0
         self.cached = fleet.snapshot()
         self.thread = None
 
@@ -121,12 +123,20 @@ class Service:
 
     def tick(self):
         guard = getattr(self.artifacts, 'history_guard', None)
-        if guard is None: return self._tick_locked()
-        from .artifacts import HistoryBusy
-        try:
-            with guard(): return self._tick_locked()
-        except HistoryBusy:
-            return
+        if guard is None:
+            completed = self._tick_locked()
+        else:
+            from .artifacts import HistoryBusy
+            try:
+                with guard(): completed = self._tick_locked()
+            except HistoryBusy:
+                return
+        # Signal only after releasing the shared history lock. The waiting
+        # migration can then acquire it without racing this reconciliation.
+        if completed:
+            with self.reconcile_condition:
+                self.reconcile_generation += 1
+                self.reconcile_condition.notify_all()
 
     def _tick_locked(self):
         self.delivery_error = None
@@ -140,8 +150,18 @@ class Service:
                 self.cached = state
                 self.last_reconcile = time.time()
                 self.last_error = None
+            return self.delivery_error is None
         except Exception as error:
             with self.lock: self.last_error = str(error)
+            return False
+
+    def wait_for_reconcile(self, after):
+        # The caller releases the history lock before waiting. A tick completed
+        # before this request arrived is sufficient when it advances the fence.
+        with self.reconcile_condition:
+            self.reconcile_condition.wait_for(lambda: self.reconcile_generation > after or self.stop_event.is_set())
+            if self.stop_event.is_set(): return None
+            return {'generation': self.reconcile_generation, 'lastReconcileWall': self.last_reconcile}
 
     def start(self):
         def run():
@@ -153,6 +173,7 @@ class Service:
 
     def close(self):
         self.stop_event.set()
+        with self.reconcile_condition: self.reconcile_condition.notify_all()
         if self.thread: self.thread.join(timeout=110)
         self.fleet.close()
 
@@ -284,6 +305,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not self.authenticated(): return self.json({'error': 'Authentication required'}, 401)
                 service = self.server.service
                 if path == '/api/state': return self.json(service.snapshot())
+                if path == '/api/reconcile/wait':
+                    query = parse_qs(parsed.query)
+                    values = query.get('after', [])
+                    if len(values) != 1 or not re.fullmatch(r'[0-9]{1,20}', values[0]):
+                        raise ValueError('after must be a nonnegative generation')
+                    result = service.wait_for_reconcile(int(values[0]))
+                    return self.json(result if result is not None else {'error': 'Controller stopping'}, 200 if result is not None else 503)
                 if path == '/api/coverage':
                     return self.json(service.coverage.snapshot() if service.coverage else {})
                 match = re.fullmatch(r'/api/workers/([^/]+)(/logs)?', path)
