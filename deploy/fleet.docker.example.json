@@ -30,5 +30,8 @@
   "spool_success_days": 3,
   "spool_failure_days": 14,
   "central_diagnostic_days": 30,
-  "central_failure_days": 90
+  "central_failure_days": 90,
+  "worker_env": {
+    "LP_NUM_THREADS": "2"
+  }
 }

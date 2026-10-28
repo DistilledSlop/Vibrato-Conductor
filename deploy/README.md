@@ -6,7 +6,7 @@ Workers are independent Pods with `restartPolicy: Never`. The conductor alone re
 
 ## Docker
 
-Copy `fleet.docker.example.json` to a local configuration and set acceptance flags only after accepting the Minecraft EULA and isolated offline identities. The initial desired count is zero. Start the controller with the `serve` command and adjust the count through its authenticated dashboard/API. The initial resource profile is 8 CPUs and 6 GiB per complete worker, with a ceiling of one. A 4-CPU worker passed isolated smoke tests but failed client tick health during concurrent rendering workloads; it is not a robust fleet default. The 8-CPU profile remains a measured candidate until concurrency validation establishes sustainable capacity. Increase `max_workers` and budgets only during deliberate capacity testing; no FPS, view distance, game rules, or visual detail reductions are silently applied.
+Copy `fleet.docker.example.json` to a local configuration and set acceptance flags only after accepting the Minecraft EULA and isolated offline identities. The initial desired count is zero. Start the controller with the `serve` command and adjust the count through its authenticated dashboard/API. The initial resource profile is 8 CPUs and 6 GiB per complete worker, with a ceiling of one. A 4-CPU worker passed isolated smoke tests but failed client tick health during concurrent rendering workloads; it is not a robust fleet default. The 8-CPU profile remains a measured candidate until concurrency validation establishes sustainable capacity. Both examples explicitly set `LP_NUM_THREADS=2` to bound software-renderer thread competition without reducing visual detail. Increase `max_workers` and budgets only during deliberate capacity testing; no FPS, view distance, game rules, or visual detail reductions are silently applied.
 
 The Docker daemon runs worker containers on the daemon host. Bind mount paths in configuration must exist on that host. If the controller runs in a container, mount its state and artifact paths at identical absolute paths inside it and on the daemon host. Access to the Docker socket gives the controller authority over the host; only trusted operators should control its API or configuration.
 
@@ -20,7 +20,13 @@ The Docker daemon runs worker containers on the daemon host. Bind mount paths in
 
 The controller uses its service account and namespace-scoped RBAC to list/create/delete workers and read logs. Workers cannot call the Kubernetes API. The worker isolation NetworkPolicy requires a CNI that enforces network policies; kind's default networking does not demonstrate enforcement. No worker Service is created, and game listeners bind Pod loopback.
 
-For a world bank, provision a read-only claim, set `world_bank_pvc` and `world_ids` in the controller configuration, and explicitly enable full-copy fallback only when its disk cost is acceptable. The bank is mounted read-only into each worker.
+For a world bank, provision a claim named `vibrato-world-bank` containing immutable bank entries and their metadata. Add `"world_bank": "/world-bank"`, `"world_bank_pvc": "vibrato-world-bank"`, and the desired `"world_ids": ["ENTRY_ID"]` to `fleet.json` in the ConfigMap. The controller needs its own read-only mount to inspect entry metadata and enforce world/task compatibility; the backend separately mounts that claim read-only into workers. Apply the optional Deployment patch after the base manifest:
+
+```sh
+kubectl -n vibrato patch deployment vibrato-controller --type=strategic --patch-file deploy/kubernetes-world-bank.patch.yaml
+```
+
+Update ConfigMap data before restarting the controller. Enable `allow_world_copy` only when full-copy fallback and its disk cost are acceptable. The live kind harness applies these config fields and the controller mount itself; the optional patch is for manual deployments. A bank claim used across nodes needs a storage class supporting read-only access from all those nodes.
 
 ## One-node kind validation
 

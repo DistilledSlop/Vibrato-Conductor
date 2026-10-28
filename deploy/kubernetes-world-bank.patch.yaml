@@ -1,0 +1,17 @@
+# Optional strategic merge patch for the controller Deployment. Also configure
+# world_bank=/world-bank, world_bank_pvc=vibrato-world-bank, and world_ids in
+# fleet.json so the scheduler can read and validate bank-entry metadata.
+spec:
+  template:
+    spec:
+      containers:
+        - name: controller
+          volumeMounts:
+            - name: world-bank
+              mountPath: /world-bank
+              readOnly: true
+      volumes:
+        - name: world-bank
+          persistentVolumeClaim:
+            claimName: vibrato-world-bank
+            readOnly: true

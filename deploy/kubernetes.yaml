@@ -75,6 +75,7 @@ data:
       "health_timeout": 45,
       "seconds": 300,
       "mode": "diagnostic",
+      "worker_env": {"LP_NUM_THREADS": "2"},
       "accept_eula": false,
       "accept_offline": false
     }
