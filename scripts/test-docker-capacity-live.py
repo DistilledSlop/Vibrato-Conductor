@@ -2,12 +2,15 @@
 """Measure a bounded healthy window for the isolated gallery fleet; always drain afterward."""
 import argparse
 import json
+import importlib.util
 import time
 from pathlib import Path
 
-from test_docker_fleet_live import Test
-
 ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("fleet_live", ROOT / "scripts/test-docker-fleet-live.py")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+Test = module.Test
 
 
 def main():
