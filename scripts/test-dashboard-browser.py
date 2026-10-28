@@ -10,6 +10,7 @@ parser.add_argument('--url', default='http://127.0.0.1:8080')
 parser.add_argument('--token-file', type=Path, required=True)
 parser.add_argument('--output', type=Path, default=Path('.state/dashboard-browser'))
 parser.add_argument('--with-workers', action='store_true')
+parser.add_argument('--minimum-workers', type=int, default=1)
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
 with sync_playwright() as p:
@@ -28,7 +29,11 @@ with sync_playwright() as p:
     page.get_by_role('button', name='Close coverage gaps').click()
     if args.with_workers:
         page.locator('.worker-card').first.wait_for(state='visible',timeout=30000)
-        page.locator('.thumbnail img:not([hidden])').first.wait_for(state='visible',timeout=45000)
+        assert page.locator('.worker-card').count() >= args.minimum_workers
+        for index in range(args.minimum_workers):
+            visible_card = page.locator('.worker-card').nth(index)
+            visible_card.scroll_into_view_if_needed()
+            visible_card.locator('.thumbnail img:not([hidden])').wait_for(state='visible', timeout=45000)
         card = page.locator('.worker-card').filter(has=page.locator('img:not([hidden])')).first
         card.locator('button.thumbnail').click()
         page.locator('#detailFrame').wait_for(state='visible',timeout=10000)
