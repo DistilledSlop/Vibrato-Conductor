@@ -42,9 +42,9 @@ class FleetConfig:
     world_ids: list[str] = field(default_factory=list)
     image: str = 'vibrato-worker:dev'
     desired: int = 0
-    max_workers: int = 1
-    cpus: float = 8
-    memory_mb: int = 6144
+    max_workers: int = 1  # zero disables the worker-count ceiling
+    cpus: float = 8  # zero disables CPU quota and CPU admission/pressure gates
+    memory_mb: int = 6144  # zero disables memory quota and memory admission/pressure gates
     storage_mb: int = 8192
     cpu_budget: float = 0
     memory_budget_mb: int = 0
@@ -96,7 +96,10 @@ class FleetConfig:
             setattr(config, name, Path(getattr(config, name)).resolve())
         if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,31}', config.fleet_id): raise ValueError('Invalid fleet_id')
         if config.backend not in ('docker', 'kubernetes'): raise ValueError('Unknown backend')
-        for name in ('desired', 'max_workers', 'memory_mb', 'storage_mb', 'memory_budget_mb',
+        desired = config.desired
+        if isinstance(desired, bool) or not isinstance(desired, int) or desired < 0:
+            raise ValueError('desired must be a nonnegative integer')
+        for name in ('max_workers', 'memory_mb', 'storage_mb', 'memory_budget_mb',
                      'storage_budget_mb', 'free_disk_reserve_mb', 'circuit_failures', 'retained_workers',
                      'event_limit', 'worker_uid', 'worker_gid'):
             raw = getattr(config, name)
@@ -106,10 +109,10 @@ class FleetConfig:
                      'unhealthy_grace_seconds', 'failure_backoff_seconds', 'max_failure_backoff_seconds',
                      'circuit_pause_seconds', 'reconcile_seconds', 'seconds'):
             setattr(config, name, _positive(getattr(config, name), name))
-        if min(config.cpus, config.memory_mb, config.storage_mb, config.startup_timeout,
+        if min(config.storage_mb, config.startup_timeout,
                config.health_timeout, config.reconcile_seconds, config.circuit_failures) <= 0:
-            raise ValueError('Resource sizes, timeouts, and circuit_failures must be positive')
-        if config.desired > config.max_workers: raise ValueError('desired exceeds max_workers safety ceiling')
+            raise ValueError('Storage size, timeouts, and circuit_failures must be positive')
+        if config.max_workers and config.desired > config.max_workers: raise ValueError('desired exceeds max_workers safety ceiling')
         if config.mode not in ('diagnostic', 'collection'): raise ValueError('Unknown mode')
         if config.perf not in ('normal', 'low'): raise ValueError('Unknown rendering profile')
         if not 10 <= config.seconds <= 86400: raise ValueError('seconds must be 10-86400')
@@ -238,8 +241,9 @@ class Fleet:
             self._external_inhibition = str(reason)[:500] if reason else None
 
     def set_target(self, n):
-        if isinstance(n, bool) or int(n) != n or not 0 <= n <= self.config.max_workers:
-            raise ValueError(f'Target must be an integer between 0 and {self.config.max_workers}')
+        if isinstance(n, bool) or not isinstance(n, int) or n < 0 or (self.config.max_workers and n > self.config.max_workers):
+            ceiling = f' between 0 and {self.config.max_workers}' if self.config.max_workers else ' greater than or equal to zero'
+            raise ValueError('Target must be an integer' + ceiling)
         if n and not (self.config.accept_eula and self.config.accept_offline):
             raise ValueError('Fleet launch requires accept_eula and accept_offline')
         with self._thread_lock, self.db:
@@ -276,29 +280,33 @@ class Fleet:
 
     def _capacity(self):
         config = self.config
-        cpus = config.cpu_budget or max(1, (os.cpu_count() or 1) - 2)
-        memory = config.memory_budget_mb
+        cpus = (config.cpu_budget or max(1, (os.cpu_count() or 1) - 2)) if config.cpus else 0
+        memory = config.memory_budget_mb if config.memory_mb else 0
         available = None
         try:
             values = {line.split(':')[0]: int(line.split()[1]) for line in Path('/proc/meminfo').read_text().splitlines() if ':' in line}
             available = values.get('MemAvailable', 0) / 1024
-            if not memory: memory = max(0, values.get('MemTotal', 0) / 1024 - 2048)
+            if config.memory_mb and not memory: memory = max(0, values.get('MemTotal', 0) / 1024 - 2048)
         except (OSError, ValueError):
-            if not memory: memory = config.memory_mb * config.max_workers
+            if config.memory_mb and not memory: memory = config.memory_mb * config.max_workers
         disk_root = config.artifacts_dir if config.backend == 'kubernetes' else config.workspace_dir
         disk_free = shutil.disk_usage(disk_root).free // 1024**2
         # Kubernetes temporary storage is admitted by the scheduler, not the controller's state PVC.
-        storage = config.storage_budget_mb or (config.storage_mb * config.max_workers if config.backend == 'kubernetes'
+        storage = config.storage_budget_mb or (config.storage_mb * config.max_workers if config.backend == 'kubernetes' and config.max_workers
                                                else max(0, disk_free - config.free_disk_reserve_mb))
-        count = max(0, min(config.max_workers, int(cpus // config.cpus), int(memory // config.memory_mb), int(storage // config.storage_mb)))
+        slots = [int(storage // config.storage_mb)]
+        if config.max_workers: slots.append(config.max_workers)
+        if config.cpus: slots.append(int(cpus // config.cpus))
+        if config.memory_mb: slots.append(int(memory // config.memory_mb))
+        count = max(0, min(slots))
         pressure = None
-        if available is not None and available < config.memory_mb + 1024: pressure = 'host_memory_pressure'
+        if config.memory_mb and available is not None and available < config.memory_mb + 1024: pressure = 'host_memory_pressure'
         disk_needed = min(config.storage_mb, 1024) if config.backend == 'kubernetes' else config.storage_mb
         if disk_free < disk_needed + config.free_disk_reserve_mb: pressure = 'host_storage_pressure'
         # CPU pressure requires sustained scheduling stalls, not a load-average guess.
         try:
             cpu_pressure = float(Path('/proc/pressure/cpu').read_text().split('avg10=')[1].split()[0])
-            if cpu_pressure > 50: pressure = 'host_cpu_pressure'
+            if config.cpus and cpu_pressure > 50: pressure = 'host_cpu_pressure'
         except (OSError, ValueError, IndexError): cpu_pressure = None
         return {'limit': count, 'cpuBudget': cpus, 'memoryBudgetMb': memory, 'storageBudgetMb': storage,
                 'freeDiskMb': disk_free, 'availableMemoryMb': available, 'cpuPressure': cpu_pressure,

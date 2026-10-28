@@ -379,5 +379,87 @@ class FleetTests(unittest.TestCase):
                      {'accept_eula': 'false'}, {'world_ids': ['../bad'], 'world_bank': '/bank'}):
             with self.subTest(data=data), self.assertRaises(ValueError): FleetConfig.from_dict(data)
 
+    def capacity_with_host(self, *, free_mb=1100, available_mb=64, cpu_pressure=85):
+        def read(path, *args, **kwargs):
+            if str(path) == '/proc/meminfo':
+                return f'MemTotal: {65536 * 1024} kB\nMemAvailable: {available_mb * 1024} kB\n'
+            if str(path) == '/proc/pressure/cpu': return f'some avg10={cpu_pressure} avg60=0 avg300=0 total=0'
+            raise OSError(str(path))
+        with patch.object(Path, 'read_text', autospec=True, side_effect=read), \
+             patch('conductor.fleet.shutil.disk_usage', return_value=SimpleNamespace(free=free_mb * 1024**2)), \
+             patch('conductor.fleet.os.cpu_count', return_value=96):
+            return Fleet._capacity(self.fleet)
+
+    def test_unlimited_count_and_resources_retain_only_storage_admission(self):
+        config = self.fleet.config
+        config.max_workers = config.cpus = config.memory_mb = 0
+        config.cpu_budget = config.memory_budget_mb = 1  # ignored without the corresponding quota
+        config.storage_budget_mb = 0
+        config.storage_mb = config.free_disk_reserve_mb = 100
+        for backend in ('docker', 'kubernetes'):
+            with self.subTest(backend=backend):
+                config.backend = backend
+                capacity = self.capacity_with_host()
+                self.assertEqual(capacity['limit'], 10)
+                self.assertEqual(capacity['cpuBudget'], 0)
+                self.assertEqual(capacity['memoryBudgetMb'], 0)
+                self.assertEqual(capacity['storageBudgetMb'], 1000)
+                self.assertEqual(capacity['cpuPressure'], 85)
+                self.assertEqual(capacity['availableMemoryMb'], 64)
+                self.assertIsNone(capacity['pressure'])
+        self.assertEqual(self.fleet.set_target(10**40)['desired'], 10**40)
+        capacity = self.capacity_with_host(free_mb=50)
+        self.assertEqual(capacity['limit'], 0)
+        self.assertEqual(capacity['pressure'], 'host_storage_pressure')
+
+    def test_unlimited_profile_can_start_beyond_the_previous_worker_count_ceiling(self):
+        config = self.fleet.config
+        config.max_workers = config.cpus = config.memory_mb = 0
+        config.storage_budget_mb = 0
+        config.storage_mb = config.free_disk_reserve_mb = 100
+        capacity = self.capacity_with_host()
+        self.fleet.set_target(4)
+        with patch.object(self.fleet, '_capacity', return_value=capacity):
+            for _ in range(4):
+                state = self.fleet.reconcile()
+                for worker in state['workers']: self.health(worker['runId'])
+                self.clock.advance(5)
+        self.assertEqual(len(self.runtime.creates), 4)
+        self.assertEqual(state['counts']['active'], 4)
+        self.assertNotEqual(state['pausedReason'], 'resource_capacity_limit')
+
+    def test_unlimited_dimensions_do_not_remove_remaining_resource_caps(self):
+        config = self.fleet.config
+        config.max_workers = 0
+        config.storage_mb = config.free_disk_reserve_mb = 100
+        config.storage_budget_mb = 1000
+        config.cpus = 0
+        config.memory_mb = 4096
+        config.memory_budget_mb = 8192
+        capacity = self.capacity_with_host()
+        self.assertEqual(capacity['limit'], 2)
+        self.assertEqual(capacity['pressure'], 'host_memory_pressure')
+        config.cpus = 8
+        config.cpu_budget = 32
+        config.memory_mb = 0
+        capacity = self.capacity_with_host()
+        self.assertEqual(capacity['limit'], 4)
+        self.assertEqual(capacity['pressure'], 'host_cpu_pressure')
+        config.memory_mb = 4096
+        config.max_workers = 3
+        capacity = self.capacity_with_host(available_mb=50000, cpu_pressure=1)
+        self.assertEqual(capacity['limit'], 2)
+        self.assertIsNone(capacity['pressure'])
+
+    def test_zero_resource_configuration_is_opt_in_and_targets_are_nonnegative_integers(self):
+        config = FleetConfig.from_dict({'max_workers': 0, 'cpus': 0, 'memory_mb': 0, 'desired': 10**40})
+        self.assertEqual(config.desired, 10**40)
+        self.assertEqual((FleetConfig().max_workers, FleetConfig().cpus, FleetConfig().memory_mb), (1, 8, 6144))
+        self.fleet.config.max_workers = 0
+        for bad in (-1, 1.5, True, '2', None, float('inf')):
+            with self.subTest(target=bad), self.assertRaises(ValueError): self.fleet.set_target(bad)
+        for bad in ({'cpus': -1}, {'memory_mb': -1}, {'max_workers': -1}, {'storage_mb': 0}, {'desired': True}):
+            with self.subTest(config=bad), self.assertRaises(ValueError): FleetConfig.from_dict(bad)
+
 
 if __name__ == '__main__': unittest.main()
