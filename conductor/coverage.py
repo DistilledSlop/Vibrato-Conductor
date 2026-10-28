@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from .storage import IDENTIFIER, digest, inspect_world_bank, verify_manifest
+from .lineage import source_admitted
 
 CATALOGS = Path(__file__).resolve().parents[1] / 'catalogs'
 DIRECTIONS = {'C2S': 'serverbound', 'S2C': 'clientbound'}
@@ -37,17 +38,23 @@ def packet_id(stream, offset: int, length: int) -> int:
 class CoverageInventory:
     def __init__(self, db_path: Path, catalog_path: Path | None = None,
                  enabled_tasks: list[str] | None = None, world_bank: Path | None = None, seed: int = 424242,
-                 task_failure_limit: int = 3, task_cooldown_seconds: float = 900):
+                 task_failure_limit: int = 3, task_cooldown_seconds: float = 900,
+                 canary_tasks: list[str] | None = None, max_active_canaries: int = 0,
+                 central_dir: Path | None = None):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.catalog_path = Path(catalog_path or CATALOGS)
         self.world_bank = Path(world_bank) if world_bank is not None else None
+        self.central_dir = Path(central_dir) if central_dir is not None else None
         self.seed = int(seed)
         self.task_failure_limit = int(task_failure_limit)
         self.task_cooldown_seconds = float(task_cooldown_seconds)
         if self.task_failure_limit < 1 or not 0 <= self.task_cooldown_seconds <= 86400:
             raise ValueError('Invalid task failure cooldown settings')
         self.lock = threading.RLock()
+        self._receipt_cache = {}
+        self._metadata_cache = {}
+        self._world_revision_cache = {}
         self.protocol_manifest = json.loads((self.catalog_path / 'protocol-767.json').read_text())
         raw_ids = {f'packet:{p["state"]}:{p["direction"]}:{p["id"]}' for p in self.protocol_manifest['packets']}
         model_path = self.catalog_path / 'model-packets.json'
@@ -85,6 +92,15 @@ class CoverageInventory:
         if self.enabled_tasks is not None:
             unknown = self.enabled_tasks - {t['id'] for t in self.tasks}
             if unknown: raise ValueError('Unknown scheduling task ids: ' + ', '.join(sorted(unknown)))
+        if canary_tasks is not None and (not isinstance(canary_tasks, list)
+                or any(not isinstance(task, str) for task in canary_tasks)):
+            raise ValueError('canary_tasks must be a list of task ids')
+        self.canary_tasks = set(canary_tasks or [])
+        unknown = self.canary_tasks - {task['id'] for task in self.tasks}
+        if unknown: raise ValueError('Unknown canary task ids: ' + ', '.join(sorted(unknown)))
+        if isinstance(max_active_canaries, bool) or not isinstance(max_active_canaries, int) or max_active_canaries < 0:
+            raise ValueError('max_active_canaries must be a nonnegative integer')
+        self.max_active_canaries = max_active_canaries
         with self._db() as db:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS targets(id TEXT PRIMARY KEY, kind TEXT NOT NULL, label TEXT NOT NULL,
@@ -213,6 +229,85 @@ class CoverageInventory:
     def _context_id(task_id, gamemode, operator):
         return 'task-context:' + task_id + ':' + gamemode + ':' + ('operator' if operator else 'non_operator')
 
+    def _earned_source_current(self, world: dict) -> bool:
+        context = world.get('earnedContext')
+        if context is None: return True
+        if not isinstance(context, dict): return False
+        source = context.get('sourceRun')
+        manifest = context.get('sourceManifestSha256')
+        return (isinstance(source, str) and IDENTIFIER.fullmatch(source)
+                and isinstance(manifest, str) and self._receipt_current(source, manifest))
+
+    @staticmethod
+    def _file_signature(path):
+        try:
+            if path.is_symlink(): return None
+            stat = path.stat()
+            return (stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+        except OSError:
+            return None
+
+    def _receipt_current(self, run_id, manifest_sha):
+        if self.central_dir is None: return False
+        from .artifacts import QUALITY_POLICY_VERSION
+        root = self.central_dir / '.admission'
+        signature = self._file_signature(root / (run_id + '.json'))
+        manifest_path = self.central_dir / run_id / 'manifest.json'
+        manifest_signature = self._file_signature(manifest_path)
+        key = (signature, manifest_signature, manifest_sha, QUALITY_POLICY_VERSION)
+        cached = self._receipt_cache.get(run_id)
+        if cached is None or cached[0] != key:
+            try:
+                valid = (signature is not None and manifest_signature is not None
+                         and digest(manifest_path) == manifest_sha
+                         and source_admitted(root, run_id, manifest_sha))
+            except OSError:
+                valid = False
+            self._receipt_cache[run_id] = (key, valid)
+        return self._receipt_cache[run_id][1]
+
+    def _effective_runs(self, db):
+        # No authoritative central receipt directory means no admitted data.
+        # Observations are retained and exposed separately as raw diagnostics.
+        eligible = []
+        if self.central_dir is not None:
+            for row in db.execute('SELECT run_id,manifest_sha FROM runs'):
+                run_id, manifest = row
+                if not self._receipt_current(run_id, manifest): continue
+                path = self.central_dir / run_id / 'metadata.json'
+                manifest_path = self.central_dir / run_id / 'manifest.json'
+                signature = (self._file_signature(path), self._file_signature(manifest_path), manifest)
+                cached = self._metadata_cache.get(run_id)
+                if cached is None or cached[0] != signature:
+                    try:
+                        if signature[0] is None or signature[1] is None or digest(manifest_path) != manifest:
+                            raise ValueError('missing or changed manifest')
+                        manifest_data = json.loads(manifest_path.read_text())
+                        files = manifest_data.get('files') if isinstance(manifest_data, dict) else None
+                        metadata_file = next((f for f in files if isinstance(f, dict) and f.get('path') == 'metadata.json'), None) if isinstance(files, list) else None
+                        if not metadata_file or metadata_file.get('sha256') != digest(path):
+                            raise ValueError('metadata differs from manifest')
+                        metadata = json.loads(path.read_text())
+                        world = metadata.get('world') if isinstance(metadata, dict) else None
+                        if world is not None and not isinstance(world, dict): raise ValueError('invalid world metadata')
+                        lineage = world.get('earnedContext') if isinstance(world, dict) else None
+                        if lineage is not None and not isinstance(lineage, dict): raise ValueError('invalid lineage')
+                        parsed = (True, lineage) if isinstance(metadata, dict) else (False, None)
+                    except (OSError, ValueError, TypeError): parsed = (False, None)
+                    self._metadata_cache[run_id] = (signature, parsed)
+                valid, lineage = self._metadata_cache[run_id][1]
+                if not valid: continue
+                if lineage is not None:
+                    source = lineage.get('sourceRun')
+                    source_manifest = lineage.get('sourceManifestSha256')
+                    if (not isinstance(source, str) or not IDENTIFIER.fullmatch(source)
+                            or not isinstance(source_manifest, str)
+                            or not self._receipt_current(source, source_manifest)): continue
+                eligible.append((run_id,))
+        db.execute('CREATE TEMP TABLE eligible_coverage_runs(run_id TEXT PRIMARY KEY)')
+        db.executemany('INSERT INTO eligible_coverage_runs VALUES(?)', eligible)
+        return len(eligible)
+
     def choose(self, run_id: str, worlds=None, pending_run_ids=None) -> dict:
         """Persist allocation before backend create; retries of a run id receive the same assignment."""
         if not IDENTIFIER.fullmatch(run_id): raise ValueError('Invalid run id')
@@ -225,7 +320,7 @@ class CoverageInventory:
             if any(not isinstance(value, str) or not IDENTIFIER.fullmatch(value) for value in pending_ids):
                 raise ValueError('Invalid pending run id')
             pending_ids = sorted(set(pending_ids))
-            bank = {w['id']: w for w in inspect_world_bank(self.world_bank)} if self.world_bank else {}
+            bank = {w['id']: w for w in inspect_world_bank(self.world_bank, revision_cache=self._world_revision_cache)} if self.world_bank else {}
             if worlds:
                 available = [bank.get(w, {'id': w, 'tags': [], 'supported': not bool(self.world_bank)}) if isinstance(w, str) else w for w in worlds]
             elif bank:
@@ -234,6 +329,9 @@ class CoverageInventory:
                 raise NoEligibleTask('No valid world-bank entries are available')
             else:
                 available = [{'id': None, 'tags': [], 'supported': True}]
+            # Earned contexts remain contingent on the current external
+            # admission receipt, even if the bank copy was valid when created.
+            available = [world for world in available if self._earned_source_current(world)]
             eligible = []
             cooldown_deadlines = []
             health = {r['task_id']: dict(r) for r in db.execute('SELECT * FROM task_health')}
@@ -256,13 +354,18 @@ class CoverageInventory:
                     pending_task[task_id] += 1
                     pending_family[families.get(task_id, task_id)] += 1
                     pending_world[json.loads(record['assignment']).get('world_id')] += 1
-            counts = dict(db.execute('SELECT target_id,COUNT(*) FROM observations GROUP BY target_id'))
-            successes = dict(db.execute('SELECT target_id,COUNT(*) FROM successes GROUP BY target_id'))
+            canary_full = (self.max_active_canaries > 0 and
+                           sum(pending_task[task_id] for task_id in self.canary_tasks) >= self.max_active_canaries)
+            self._effective_runs(db)
+            counts = dict(db.execute('SELECT target_id,COUNT(*) FROM observations JOIN eligible_coverage_runs USING(run_id) GROUP BY target_id'))
+            successes = dict(db.execute('SELECT target_id,COUNT(*) FROM successes JOIN eligible_coverage_runs USING(run_id) GROUP BY target_id'))
             for task in self.tasks:
                 task_health = health.get(task['id'], {})
                 if not task['supported'] or self.enabled_tasks is not None and task['id'] not in self.enabled_tasks: continue
+                if canary_full and task['id'] in self.canary_tasks: continue
                 for world in available:
                     if not world.get('supported', True) or world.get('minecraftVersion', '1.21.1') != '1.21.1': continue
+                    if world.get('allowedTasks') is not None and task['id'] not in world['allowedTasks']: continue
                     if not set(task.get('requiresTags', [])).issubset(world.get('tags', [])): continue
                     if task['gamemode'] not in world.get('gamemodes', ['survival', 'creative', 'adventure', 'spectator']): continue
                     if task['operator'] and world.get('allowOperator', True) is not True: continue
@@ -505,8 +608,10 @@ class CoverageInventory:
 
     def snapshot(self) -> dict:
         with self.lock, self._db() as db:
-            counts = {r[0]: (r[1], r[2]) for r in db.execute('SELECT target_id,COUNT(*),SUM(count) FROM observations GROUP BY target_id')}
-            successes = dict(db.execute('SELECT target_id,COUNT(*) FROM successes GROUP BY target_id'))
+            eligible_count = self._effective_runs(db)
+            counts = {r[0]: (r[1], r[2]) for r in db.execute('SELECT target_id,COUNT(*),SUM(count) FROM observations JOIN eligible_coverage_runs USING(run_id) GROUP BY target_id')}
+            raw_counts = {r[0]: (r[1], r[2]) for r in db.execute('SELECT target_id,COUNT(*),SUM(count) FROM observations GROUP BY target_id')}
+            successes = dict(db.execute('SELECT target_id,COUNT(*) FROM successes JOIN eligible_coverage_runs USING(run_id) GROUP BY target_id'))
             health = {r['task_id']: dict(r) for r in db.execute('SELECT * FROM task_health')}
             targets = []
             categories = {}
@@ -519,9 +624,11 @@ class CoverageInventory:
                 if action_proven: details.update({'unsupportedReason': None, 'supportProvenByObservation': True})
                 target = {'id': row['id'], 'kind': row['kind'], 'label': row['label'], 'supported': supported,
                           'evidenceRule': row['evidence_rule'], 'observedRuns': observed_runs,
-                          'observations': observations, 'successfulRuns': success, **details}
+                          'observations': observations, 'successfulRuns': success,
+                          'rawObservedRuns': raw_counts.get(row['id'], (0, 0))[0], **details}
                 if row['kind'] == 'task':
                     record = health.get(row['id'].removeprefix('task:'), {})
+                    target['canary'] = row['id'].removeprefix('task:') in self.canary_tasks
                     target['failures'] = record.get('failures', 0)
                     target['cooldownUntil'] = record.get('cooldown_until', 0)
                 targets.append(target)
@@ -532,12 +639,14 @@ class CoverageInventory:
                              for target in targets if target['id'] in self.model_packets]
             def packet_stats(rows):
                 return {'requested': len(rows), 'observed': sum(bool(row['observedRuns']) for row in rows),
+                        'rawObserved': sum(bool(row['rawObservedRuns']) for row in rows),
                         'missing': sum(not bool(row['observedRuns']) for row in rows),
                         'missingTargets': [row['id'] for row in rows if not row['observedRuns']]}
             by_task = defaultdict(dict)
             for row in db.execute("""SELECT substr(t.target_id,6) AS task_id,p.target_id,
                     COUNT(*) AS observed_runs,SUM(p.count) AS observations
                     FROM observations t JOIN observations p ON p.run_id=t.run_id
+                    JOIN eligible_coverage_runs e ON e.run_id=t.run_id
                     WHERE t.target_id LIKE 'task:%' AND p.target_id LIKE 'packet:%'
                     GROUP BY t.target_id,p.target_id"""):
                 by_task[row['task_id']][row['target_id']] = {'id': row['target_id'],
@@ -561,7 +670,10 @@ class CoverageInventory:
                 'evidenceRule': 'actual_raw_wire_presence_in_reader_relevant_Play_subset',
                 'limitations': ['Wire presence does not prove a HYBRID model-owned branch or a decoded training row',
                     'Per-task packet counts describe runs with actual task dispatch; bootstrap/incidental traffic is included and causality is unproven']}
-            return {'categories': categories, 'targets': targets, 'taskHealth': list(health.values()),
+            return {'coverageScope': 'current_independent_admission', 'eligibleRuns': eligible_count,
+                    'categories': categories, 'targets': targets, 'taskHealth': list(health.values()),
+                    'taskHealthScope': 'raw_worker_gameplay_outcomes_not_training_admission',
+                    'canaryScheduling': {'tasks': sorted(self.canary_tasks), 'maxActive': self.max_active_canaries},
                     'modelPacketCoverage': model_coverage,
                     'missing': [t['id'] for t in targets if not t['observedRuns']],
                     'unsupported': [t['id'] for t in targets if not t['supported']],

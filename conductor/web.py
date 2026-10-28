@@ -151,8 +151,8 @@ class Service:
             state['coverage'] = {k: v for k, v in inventory.items() if k not in ('targets', 'missing', 'unsupported', 'modelPacketCoverage')}
             model = inventory.get('modelPacketCoverage', {})
             state['coverage']['modelPacketCoverage'] = {
-                **{key: model.get(key, 0) for key in ('requested', 'observed', 'missing')},
-                **{role: {key: model.get(role, {}).get(key, 0) for key in ('requested', 'observed', 'missing')}
+                **{key: model.get(key, 0) for key in ('requested', 'observed', 'missing', 'rawObserved')},
+                **{role: {key: model.get(role, {}).get(key, 0) for key in ('requested', 'observed', 'missing', 'rawObserved')}
                    for role in ('output', 'input')}}
         if self.artifacts is not None: state['storage'] = self.artifacts.snapshot()
         admissions = {row['run_id']: row.get('quality') for row in state.get('storage', {}).get('runs', [])}
@@ -362,20 +362,28 @@ def load_token(path: Path) -> str:
     return token
 
 
+SERVICE_CONFIG_KEYS = {'max_buffer_bytes', 'enabled_tasks', 'canary_tasks', 'max_active_canaries',
+                       'catalog_dir', 'delivery_retry_seconds', 'spool_success_days', 'spool_failure_days',
+                       'central_diagnostic_days', 'central_failure_days', 'workspace_success_days',
+                       'workspace_failure_days', 'max_central_bytes'}
+
+
+def scheduler_from_config(config_data, config):
+    from .coverage import CoverageInventory
+    return CoverageInventory(config.state_dir / 'coverage.sqlite3', world_bank=config.world_bank, central_dir=config.central_dir,
+                             catalog_path=config_data.get('catalog_dir'), enabled_tasks=config_data.get('enabled_tasks'),
+                             seed=config.seed, canary_tasks=config_data.get('canary_tasks'),
+                             max_active_canaries=config_data.get('max_active_canaries', 0))
+
+
 def serve(config_path, host='0.0.0.0', port=8080, token_file=None):
     from .fleet import Fleet, FleetConfig
-    from .coverage import CoverageInventory
     from .artifacts import ArtifactStore
     config_data = json.loads(Path(config_path).read_text())
-    service_keys = {'max_buffer_bytes', 'enabled_tasks', 'catalog_dir', 'delivery_retry_seconds',
-                    'spool_success_days', 'spool_failure_days', 'central_diagnostic_days', 'central_failure_days',
-                    'workspace_success_days', 'workspace_failure_days', 'max_central_bytes'}
-    fleet_data = {k: v for k, v in config_data.items() if k not in service_keys}
+    fleet_data = {k: v for k, v in config_data.items() if k not in SERVICE_CONFIG_KEYS}
     fleet_data.setdefault('central_dir', str(Path(fleet_data.get('state_dir', '.state/fleet')) / 'dataset'))
     config = FleetConfig.from_dict(fleet_data)
-    inventory = CoverageInventory(config.state_dir / 'coverage.sqlite3', world_bank=config.world_bank,
-                                  catalog_path=config_data.get('catalog_dir'),
-                                  enabled_tasks=config_data.get('enabled_tasks'), seed=config.seed)
+    inventory = scheduler_from_config(config_data, config)
     fleet = Fleet(config, scheduler=inventory)
     central = config.central_dir
     store = ArtifactStore(config.artifacts_dir, central, state_dir=config.state_dir / 'delivery',

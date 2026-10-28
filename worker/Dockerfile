@@ -17,8 +17,8 @@ COPY proxy/package*.json /opt/proxy/
 RUN cd /opt/proxy && npm ci --omit=dev
 COPY vibrato/gradle.properties /opt/vibrato/gradle.properties
 COPY vibrato/scripts/fleet/launch.py /opt/vibrato/scripts/fleet/launch.py
-COPY install.py /opt/install.py
-RUN python3 -u /opt/install.py
+COPY install.py preextract_server_bundle.py /opt/
+RUN python3 -u /opt/install.py && python3 /opt/preextract_server_bundle.py
 COPY vibrato/build/libs/ /opt/game/mods/
 COPY vibrato/build/server-mods/ /opt/server/mods/
 RUN python3 /opt/install.py --finalize-mods

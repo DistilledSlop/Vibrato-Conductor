@@ -32,6 +32,16 @@ def capture_run(root, run_id='run-one', task='@get oak_log 1', success=None, obs
     return run
 
 
+def admit_run(inventory, run):
+    from conductor.artifacts import QUALITY_POLICY_VERSION
+    from conductor.storage import digest
+    inventory.central_dir = run.parent
+    atomic_json(run.parent / '.admission' / (run.name + '.json'),
+                {'runId': run.name, 'manifestSha256': digest(run / 'manifest.json'),
+                 'quality': {'policyVersion': QUALITY_POLICY_VERSION, 'eligible': True}})
+
+
+
 class CoverageTests(unittest.TestCase):
     def test_requested_inventory_is_complete_and_assignment_is_not_observation(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -46,6 +56,7 @@ class CoverageTests(unittest.TestCase):
             self.assertEqual(before['categories']['task']['observed'], 0)
             self.assertIn('task:protocol-fixture-suite', before['unsupported'])
             run = capture_run(root / 'runs', success=True)
+            admit_run(inventory, run)
             inventory.ingest(run)
             after = inventory.snapshot()
             self.assertEqual(after['categories']['task']['observed'], 0)
@@ -56,6 +67,7 @@ class CoverageTests(unittest.TestCase):
             root = Path(folder)
             inventory = CoverageInventory(root / 'coverage.sqlite')
             run = capture_run(root / 'runs')
+            admit_run(inventory, run)
             first = inventory.ingest(run)
             self.assertEqual(first, inventory.ingest(run))
             data = inventory.snapshot()
@@ -73,6 +85,7 @@ class CoverageTests(unittest.TestCase):
             observed = {'items': ['minecraft:oak_log'], 'blocks': ['minecraft:stone'], 'mobs': ['minecraft:zombie']}
             run = capture_run(root / 'runs', success=True, observations=observed,
                               semantics={'items': 'inventory_present', 'blocks': 'crosshair_target', 'mobs': 'loaded_nearby'}, include_script=True)
+            admit_run(inventory, run)
             inventory.ingest(run)
             data = inventory.snapshot()
             for category in ['item', 'block', 'mob']:
@@ -117,6 +130,7 @@ class FailureSchedulingTests(unittest.TestCase):
                 run_id = 'failure-'+str(index)
                 inventory.choose(run_id)
                 run = capture_run(root / 'runs', run_id, success=False, include_script=True)
+                admit_run(inventory, run)
                 inventory.ingest(run)
             task = next(t for t in inventory.snapshot()['targets'] if t['id'] == 'task:get-oak_log')
             self.assertEqual(task['failures'], 2)
@@ -155,18 +169,202 @@ class FailureSchedulingTests(unittest.TestCase):
 
 
 class DiversitySchedulingTests(unittest.TestCase):
-    def inventory(self, root, tasks, name='coverage', seed=73):
+    def inventory(self, root, tasks, name='coverage', seed=73, **settings):
         catalog = root / 'catalog'
         catalog.mkdir(exist_ok=True)
         atomic_json(catalog / 'tasks.json', {'tasks': tasks})
         atomic_json(catalog / 'protocol-767.json', {'packets': []})
         atomic_json(catalog / 'registries-1.21.1.json', {'items': [], 'blocks': [], 'mobs': [], 'entities': []})
         (catalog / 'obtainable-items.txt').write_text('')
-        return CoverageInventory(root / (name + '.sqlite'), catalog_path=catalog, seed=seed)
+        return CoverageInventory(root / (name + '.sqlite'), catalog_path=catalog, seed=seed, **settings)
 
     def task(self, identifier, family):
         return {'id':identifier, 'family':family, 'command':'@get '+identifier+' 1',
                 'seconds':60,'targets':[],'supported':True,'requiresTags':[]}
+
+    def test_canary_cap_uses_live_reservations_and_keeps_regular_work_running(self):
+        with tempfile.TemporaryDirectory() as folder:
+            tasks = [self.task('canary-a','canary'), self.task('canary-b','canary'),
+                     self.task('regular-a','gather'), self.task('regular-b','build')]
+            inventory = self.inventory(Path(folder), tasks, canary_tasks=['canary-a','canary-b'], max_active_canaries=1)
+            inventory.enabled_tasks = {'canary-a'}
+            first = inventory.choose('canary-live')
+            self.assertEqual(first['task_id'], 'canary-a')
+            inventory.enabled_tasks = None
+            active = ['canary-live']
+            regular = []
+            for index in range(6):
+                run = f'regular-{index}'
+                result = inventory.choose(run, pending_run_ids=active)
+                regular.append(result['family'])
+                self.assertTrue(result['task_id'].startswith('regular-'))
+                active.append(run)
+            self.assertEqual(set(regular), {'gather','build'})
+            self.assertEqual(first, inventory.choose('canary-live', pending_run_ids=active))
+            inventory.enabled_tasks = {'canary-b'}
+            with self.assertRaises(NoEligibleTask):
+                inventory.choose('all-canaries-busy', pending_run_ids=active)
+            # Once the live reservation ends, a canary can be allocated again.
+            inventory.enabled_tasks = {'canary-b'}
+            self.assertEqual(inventory.choose('canary-next', pending_run_ids=active[1:])['task_id'], 'canary-b')
+
+    def test_canaries_obey_context_enabled_tasks_and_cooldown(self):
+        with tempfile.TemporaryDirectory() as folder:
+            tasks = [self.task('canary','canary'), self.task('regular','gather')]
+            tasks[0]['requiresTags'] = ['prepared']
+            inventory = self.inventory(Path(folder), tasks, canary_tasks=['canary'], max_active_canaries=1)
+            plain = [{'id':'plain','tags':[]}]
+            ready = [{'id':'ready','tags':['prepared']}]
+            self.assertEqual(inventory.choose('plain', worlds=plain)['task_id'], 'regular')
+            inventory.enabled_tasks = {'regular'}
+            self.assertEqual(inventory.choose('excluded', worlds=ready)['task_id'], 'regular')
+            inventory.enabled_tasks = None
+            with inventory._db() as db:
+                db.execute('INSERT INTO task_health(task_id,cooldown_until) VALUES(?,?)', ('canary',1000))
+            with patch('conductor.coverage.time.time', return_value=100):
+                self.assertEqual(inventory.choose('cooldown', worlds=ready)['task_id'], 'regular')
+            inventory.enabled_tasks = {'canary'}
+            with patch('conductor.coverage.time.time', return_value=1001):
+                self.assertEqual(inventory.choose('recovered', worlds=ready)['task_id'], 'canary')
+
+    def test_canary_configuration_validation_and_unrestricted_default(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            tasks=[self.task('canary','canary')]
+            for index, options in enumerate(({'canary_tasks':'canary'}, {'canary_tasks':['unknown']},
+                    {'max_active_canaries':-1}, {'max_active_canaries':True}, {'max_active_canaries':1.5})):
+                with self.assertRaises(ValueError): self.inventory(root,tasks,name='bad'+str(index),**options)
+            inventory=self.inventory(root,tasks,name='unlimited',canary_tasks=['canary'])
+            first=inventory.choose('first')
+            self.assertEqual(inventory.choose('second',pending_run_ids=['first'])['task_id'], first['task_id'])
+
+    def test_earned_context_is_only_assigned_to_its_explicit_task(self):
+        with tempfile.TemporaryDirectory() as folder:
+            tasks=[self.task('organize','inventory'), self.task('gather','gather')]
+            inventory=self.inventory(Path(folder),tasks)
+            contexts=[{'id':'earned','tags':[], 'allowedTasks':['organize']},
+                      {'id':'normal','tags':[], 'allowedTasks':None}]
+            inventory.enabled_tasks={'gather'}
+            self.assertEqual(inventory.choose('gather-run',worlds=contexts)['world_id'],'normal')
+            with self.assertRaises(NoEligibleTask):
+                inventory.choose('wrong-task',worlds=[contexts[0]])
+            inventory.enabled_tasks={'organize'}
+            self.assertEqual(inventory.choose('organize-run',worlds=[contexts[0]])['world_id'],'earned')
+
+    def test_ordinary_world_bank_without_allowed_tasks_remains_schedulable(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            inventory=self.inventory(root,[self.task('gather','gather')])
+            world=root/'bank'/'ordinary'/'world'
+            world.mkdir(parents=True)
+            (world/'level.dat').write_bytes(b'world')
+            inventory.world_bank=root/'bank'
+            self.assertEqual(inventory.choose('ordinary-bank')['world_id'], 'ordinary')
+
+    def test_earned_context_stops_scheduling_when_source_admission_changes(self):
+        from conductor.artifacts import QUALITY_POLICY_VERSION
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            central=root/'central'
+            receipts=central/'.admission'
+            receipts.mkdir(parents=True)
+            inventory=self.inventory(root,[self.task('organize','inventory')],central_dir=central)
+            from conductor.storage import digest
+            source='source-run'; source_dir=central/source;source_dir.mkdir()
+            atomic_json(source_dir/'manifest.json', {'source':'immutable'})
+            manifest=digest(source_dir/'manifest.json')
+            world={'id':'earned','tags':[], 'allowedTasks':['organize'],
+                   'earnedContext':{'sourceRun':source, 'sourceManifestSha256':manifest}}
+            receipt={'runId':source, 'manifestSha256':manifest,
+                     'quality':{'policyVersion':QUALITY_POLICY_VERSION, 'eligible':True}}
+            atomic_json(receipts/(source+'.json'),receipt)
+            self.assertEqual(inventory.choose('accepted',worlds=[world])['world_id'],'earned')
+            receipt['quality']['eligible']=False
+            atomic_json(receipts/(source+'.json'),receipt)
+            with self.assertRaises(NoEligibleTask): inventory.choose('revoked',worlds=[world])
+            receipt['quality']={'policyVersion':QUALITY_POLICY_VERSION-1,'eligible':True}
+            atomic_json(receipts/(source+'.json'),receipt)
+            with self.assertRaises(NoEligibleTask): inventory.choose('stale',worlds=[world])
+            receipt['quality']['policyVersion']=QUALITY_POLICY_VERSION
+            receipt['manifestSha256']='b' * 64
+            atomic_json(receipts/(source+'.json'),receipt)
+            with self.assertRaises(NoEligibleTask): inventory.choose('changed',worlds=[world])
+            (receipts/(source+'.json')).unlink()
+            with self.assertRaises(NoEligibleTask): inventory.choose('missing',worlds=[world])
+
+    def test_reaudit_retracts_effective_coverage_success_and_deficit_but_keeps_raw(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            inventory=self.inventory(root,[self.task('known','known'),self.task('unseen','unseen')])
+            run=capture_run(root/'runs','proof',task='@get known 1',success=True,include_script=True)
+            admit_run(inventory,run)
+            inventory.ingest(run)
+            target=lambda: next(t for t in inventory.snapshot()['targets'] if t['id']=='task:known')
+            self.assertEqual((target()['observedRuns'],target()['successfulRuns'],target()['rawObservedRuns']), (1,1,1))
+            # Pick a fixed tie that favors known when no admitted evidence exists.
+            candidate=next('tie-'+str(i) for i in range(1000) if
+                hashlib.sha256(f'73:tie-{i}:family:known'.encode()).hexdigest() >
+                hashlib.sha256(f'73:tie-{i}:family:unseen'.encode()).hexdigest())
+            self.assertEqual(inventory.choose(candidate)['task_id'],'unseen')
+            with inventory._db() as db: db.execute('DELETE FROM assignments WHERE run_id=?',(candidate,))
+            receipt=run.parent/'.admission'/'proof.json'
+            data=json.loads(receipt.read_text());data['quality']['eligible']=False;atomic_json(receipt,data)
+            self.assertEqual((target()['observedRuns'],target()['successfulRuns'],target()['rawObservedRuns']), (0,0,1))
+            self.assertEqual(inventory.choose(candidate)['task_id'],'known')
+            # Idempotent ingest must not resurrect revoked effective evidence.
+            inventory.ingest(run)
+            self.assertEqual(target()['observedRuns'],0)
+            data['quality']['eligible']=True;data['quality']['policyVersion']=0;atomic_json(receipt,data)
+            self.assertEqual(target()['observedRuns'],0)
+            data['quality']['policyVersion']=4;data['manifestSha256']='0'*64;atomic_json(receipt,data)
+            self.assertEqual(target()['observedRuns'],0)
+            receipt.unlink()
+            self.assertEqual(target()['observedRuns'],0)
+
+    def test_missing_admission_root_is_raw_diagnostics_only(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);inventory=self.inventory(root,[self.task('known','known')])
+            inventory.ingest(capture_run(root/'runs','proof',task='@get known 1',success=True,include_script=True))
+            snap=inventory.snapshot();task=next(t for t in snap['targets'] if t['id']=='task:known')
+            self.assertEqual((task['observedRuns'],task['successfulRuns'],task['rawObservedRuns']),(0,0,1))
+            self.assertEqual(snap['coverageScope'],'current_independent_admission')
+
+    def test_revoking_earned_source_retracts_descendant_coverage_immediately(self):
+        from conductor.artifacts import QUALITY_POLICY_VERSION
+        from conductor.storage import digest
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);inventory=self.inventory(root,[self.task('known','known')])
+            run=capture_run(root/'runs','descendant',task='@get known 1',success=True,include_script=True)
+            source_run=run.parent/'source';source_run.mkdir()
+            atomic_json(source_run/'manifest.json', {'source':'immutable'})
+            source_sha=digest(source_run/'manifest.json')
+            metadata=json.loads((run/'metadata.json').read_text())
+            metadata['world']={'earnedContext':{'sourceRun':'source','sourceManifestSha256':source_sha}}
+            atomic_json(run/'metadata.json',metadata)
+            result=json.loads((run/'result.json').read_text());atomic_json(run/'manifest.json',artifact_manifest(run,result))
+            admit_run(inventory,run)
+            source=run.parent/'.admission'/'source.json'
+            receipt={'runId':'source','manifestSha256':source_sha,
+                     'quality':{'policyVersion':QUALITY_POLICY_VERSION,'eligible':True}}
+            atomic_json(source,receipt);inventory.ingest(run)
+            target=lambda: next(t for t in inventory.snapshot()['targets'] if t['id']=='task:known')
+            self.assertEqual(target()['observedRuns'],1)
+            receipt['quality']['eligible']=False;atomic_json(source,receipt)
+            self.assertEqual((target()['observedRuns'],target()['rawObservedRuns']),(0,1))
+
+    def test_raw_gameplay_health_is_distinct_from_admitted_success(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);inventory=self.inventory(root,[self.task('known','known')])
+            with inventory._db() as db:
+                db.execute('INSERT INTO task_health(task_id,failures,consecutive_failures,cooldown_until) VALUES(?,?,?,?)',
+                           ('known',3,3,1000))
+            run=capture_run(root/'runs','excluded',task='@get known 1',success=True,include_script=True)
+            inventory.ingest(run) # no independent admission receipt
+            snap=inventory.snapshot();target=next(t for t in snap['targets'] if t['id']=='task:known')
+            self.assertEqual(target['successfulRuns'],0)
+            self.assertEqual(snap['taskHealth'][0]['consecutive_failures'],0)
+            self.assertEqual(snap['taskHealthScope'],'raw_worker_gameplay_outcomes_not_training_admission')
 
     def test_unequal_catalog_sizes_do_not_crowd_smaller_families(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -223,10 +421,13 @@ class DiversitySchedulingTests(unittest.TestCase):
     def test_observed_deficits_still_prioritize_uncovered_family(self):
         with tempfile.TemporaryDirectory() as folder:
             inventory=self.inventory(Path(folder),[self.task('known','gather'),self.task('unseen','creative')])
+            run = capture_run(Path(folder) / 'runs', 'proof')
+            admit_run(inventory, run)
+            inventory.ingest(run)
             with inventory._db() as db:
                 for target in ('task:known',inventory._context_id('known','survival',False)):
-                    db.execute('INSERT INTO observations VALUES(?,?,?,?)',('proof',target,1,'[]'))
-                    db.execute('INSERT INTO successes VALUES(?,?)',('proof',target))
+                    db.execute('INSERT OR IGNORE INTO observations VALUES(?,?,?,?)',('proof',target,1,'[]'))
+                    db.execute('INSERT OR IGNORE INTO successes VALUES(?,?)',('proof',target))
             self.assertEqual(inventory.choose('deficit')['task_id'],'unseen')
 
     def test_incompatible_or_cooling_families_never_earn_rotation_slots(self):
@@ -249,6 +450,7 @@ class InteractionGapTests(unittest.TestCase):
             run = capture_run(root / 'runs', success=True, include_script=True,
                 observations={'items': ['minecraft:oak_log'], 'blocks': ['minecraft:stone'], 'mobs': ['minecraft:zombie']},
                 semantics={'items': 'inventory_present', 'blocks': 'crosshair_target', 'mobs': 'loaded_nearby'})
+            admit_run(inventory, run)
             inventory.ingest(run)
             targets = {row['id']: row for row in inventory.snapshot()['targets']}
             for identity in ['item-acquire:minecraft:oak_log', 'item-use:minecraft:oak_log',
@@ -295,6 +497,7 @@ class ModeCurriculumTests(unittest.TestCase):
             (run / 'heartbeats.jsonl').write_text(json.dumps(heartbeat)+'\n')
             result = json.loads((run / 'result.json').read_text())
             atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            admit_run(inventory, run)
             inventory.ingest(run)
             targets = {t['id']: t for t in inventory.snapshot()['targets']}
             self.assertEqual(targets['mode:survival']['observedRuns'], 1)
@@ -318,6 +521,7 @@ class ModeCurriculumTests(unittest.TestCase):
                     {'kind': 'item_use', 'id': 'minecraft:diamond', 'serverConfirmed': False, 'success': True}]}})
             result = json.loads((run / 'result.json').read_text())
             atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            admit_run(inventory, run)
             inventory.ingest(run)
             targets = {t['id']: t for t in inventory.snapshot()['targets']}
             for identity in ['scenario:creative_inventory', 'task-context:creative_inventory:creative:non_operator',
@@ -339,6 +543,7 @@ class ModeCurriculumTests(unittest.TestCase):
                     'operatorCommand':{'command':'/time query daytime','serverConfirmed':True,'success':True}}})
             result = json.loads((run / 'result.json').read_text())
             atomic_json(run / 'manifest.json', artifact_manifest(run, result))
+            admit_run(inventory, run)
             inventory.ingest(run)
             targets = {t['id']:t for t in inventory.snapshot()['targets']}
             self.assertEqual(targets['permission:operator']['observedRuns'],0)
@@ -356,6 +561,7 @@ class LimitedOperatorTests(unittest.TestCase):
             (run / 'heartbeats.jsonl').write_text(json.dumps({'actualMode':'survival','permissionLevel':1,'permissionSource':'server_observer'})+'\n')
             result=json.loads((run / 'result.json').read_text())
             atomic_json(run / 'manifest.json',artifact_manifest(run,result))
+            admit_run(inventory, run)
             inventory.ingest(run)
             targets={t['id']:t for t in inventory.snapshot()['targets']}
             self.assertEqual(targets['permission:operator']['observedRuns'],1)

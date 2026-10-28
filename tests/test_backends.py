@@ -49,6 +49,24 @@ class BackendTests(unittest.TestCase):
                     self.assertEqual('memory' in resources, memory > 0)
                     self.assertEqual(resources['ephemeral-storage'], '8192Mi')
 
+    def test_source_admissions_are_read_only_in_docker_and_absent_from_kubernetes(self):
+        central = Path(self.folder.name) / 'central'
+        admissions = central / '.admission'
+        admissions.mkdir(parents=True)
+        config = FleetConfig.from_dict({**self.config.__dict__, 'central_dir': central,
+                                        'worker_env': {'SOURCE_ADMISSIONS_DIR': '/spoof'}})
+        backend = DockerBackend(config)
+        with patch.object(backend, 'list_workers', return_value=[]), patch(
+                'conductor.backends.command', side_effect=['created-id', 'started']) as invoke:
+            backend.create_worker(self.spec)
+        argv = invoke.call_args_list[0].args[0]
+        self.assertIn(f'type=bind,src={admissions},dst=/source-admissions,readonly', argv)
+        self.assertIn('SOURCE_ADMISSIONS_DIR=/source-admissions', argv)
+        kube = FleetConfig.from_dict({**config.__dict__, 'backend': 'kubernetes', 'world_bank_pvc': 'bank'})
+        container = KubernetesBackend(kube).pod_manifest(self.spec)['spec']['containers'][0]
+        self.assertEqual(next(e['value'] for e in container['env'] if e['name'] == 'SOURCE_ADMISSIONS_DIR'), '/source-admissions')
+        self.assertFalse(any(v['mountPath'] == '/source-admissions' for v in container['volumeMounts']))
+
     def test_assignment_modes_and_operator_permissions_are_explicit(self):
         baseline = worker_env(self.config, self.spec)
         self.assertEqual(baseline['GAMEMODE'], 'survival')

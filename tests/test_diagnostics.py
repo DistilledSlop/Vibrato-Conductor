@@ -89,6 +89,13 @@ class DiagnosticTests(unittest.TestCase):
         self.assertEqual(assessment['reason'], 'task_semantic_stall')
         self.assertEqual(assessment['confidence'], 'inferred')
 
+    def test_observed_crop_growth_resets_stall_but_unchanged_growth_does_not(self):
+        dog = Watchdog(stall_seconds=30)
+        dog.observe(client(cropGrowthCount=0), None, {}, 0)
+        self.assertIsNone(dog.observe(client(cropGrowthCount=1), None, {}, 29))
+        self.assertIsNone(dog.observe(client(cropGrowthCount=1), None, {}, 58))
+        self.assertEqual(dog.observe(client(cropGrowthCount=1), None, {}, 59)['reason'], 'task_semantic_stall')
+
     def test_exploration_novel_chunks_count_but_circles_do_not(self):
         dog=Watchdog(stall_seconds=30)
         for second in range(90):
@@ -138,6 +145,30 @@ class DiagnosticTests(unittest.TestCase):
         dog=Watchdog(pillar_seconds=10)
         for second in range(12):
             self.assertIsNone(dog.observe(client(movement='MovementPillar',pillarAttempts=second,position=[0,64+second,0]),None,{},second))
+
+    def test_airborne_pillar_ascent_is_progress_but_jump_in_place_is_not(self):
+        ascending = Watchdog(pillar_seconds=10)
+        stalled = Watchdog(pillar_seconds=10)
+        for second in range(12):
+            grounded = second < 4
+            rising = 64 if grounded else 64 + (second - 3) * 1.2
+            self.assertIsNone(ascending.observe(client(movement='MovementPillar', pillarAttempts=second,
+                position=[0, rising, 0], onGround=grounded), None, {}, second))
+            result = stalled.observe(client(movement='MovementPillar', pillarAttempts=second,
+                position=[0, 64 if grounded else 65.2, 0], onGround=grounded), None, {}, second)
+        self.assertEqual(result['reason'], 'nerd_pole_no_height_gain')
+
+    def test_airborne_fresh_nether_ascent_and_repeated_jump_behavior(self):
+        ascending = Watchdog(pillar_seconds=45)
+        bouncing = Watchdog(pillar_seconds=45)
+        for second in range(47):
+            attempts = int(second * 13 / 45)
+            height = 26 if second < 38 else 26 + (second - 38) * 1.5
+            self.assertIsNone(ascending.observe(client(movement='MovementPillar', pillarAttempts=attempts,
+                position=[0, height, 0], onGround=second < 38), None, {}, second))
+            result = bouncing.observe(client(movement='MovementPillar', pillarAttempts=attempts,
+                position=[0, 26 if second % 2 == 0 else 27.2, 0], onGround=second % 2 == 0), None, {}, second)
+        self.assertEqual(result['reason'], 'nerd_pole_no_height_gain')
 
     def test_client_overload_does_not_require_server_overload(self):
         dog=Watchdog()

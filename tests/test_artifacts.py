@@ -57,6 +57,26 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(json.loads((root / 'central/.admission' / (run.name + '.json')).read_text()), audit)
             self.assertTrue(result['datasetEligible'])  # Original worker verdict is preserved as evidence.
 
+    def test_reaudit_never_downgrades_a_newer_policy(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = finalized(root / 'local', mode='collection', success=True)
+            store = ArtifactStore(root / 'local', root / 'central', root / 'state')
+            store.enqueue(run.name); store.deliver_pending()
+            receipt = root / 'central/.admission' / (run.name + '.json')
+            data = json.loads(receipt.read_text())
+            data['quality']['policyVersion'] = 999
+            data['quality']['eligible'] = False
+            data['quality']['reasons'] = ['newer_policy_rejected']
+            atomic_json(receipt, data)
+            with store._db() as db:
+                db.execute('UPDATE deliveries SET quality=? WHERE run_id=?', (json.dumps(data['quality']), run.name))
+            before = receipt.read_bytes()
+            self.assertEqual(store.reaudit_outdated(limit=100), [])
+            with self.assertRaisesRegex(ValueError, 'newer admission policy'):
+                store.reaudit(run.name)
+            self.assertEqual(receipt.read_bytes(), before)
+
     def test_retry_survives_restart_and_publishes_only_verified_run(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

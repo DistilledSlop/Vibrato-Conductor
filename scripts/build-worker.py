@@ -38,9 +38,11 @@ def main():
         f'vibrato/build/libs/{jars[0].name}': jars[0],
         f'vibrato/build/server-mods/{telemetry_jars[0].name}': telemetry_jars[0],
         'Dockerfile': ROOT / 'worker/Dockerfile', 'install.py': ROOT / 'worker/install.py',
+        'preextract_server_bundle.py': ROOT / 'worker/preextract_server_bundle.py',
     }
     for name in ('index.js', 'recorder.js', 'sanitize.js', 'wire.js', 'package.json', 'package-lock.json'):
         inputs['proxy/' + name] = args.proxy / 'proxy' / name
+    inputs['conductor/migrate_player.js'] = ROOT / 'conductor/migrate_player.js'
     for source in (ROOT / 'conductor').glob('*.py'):
         inputs['conductor/' + source.name] = source
     # Remove obsolete staged files so old assets cannot leak into subsequent builds.

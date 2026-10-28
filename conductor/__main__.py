@@ -71,7 +71,46 @@ def main():
     fleet_status = commands.add_parser('fleet-status', help='Inspect the running conductor API')
     fleet_status.add_argument('--url', default='http://127.0.0.1:8080')
     fleet_status.add_argument('--token-file', type=Path, default=Path('.state/fleet/dashboard.token'))
+    enroll = commands.add_parser('import-training-run', help='Verify and deliver one eligible isolated run')
+    enroll.add_argument('--config', type=Path, required=True)
+    enroll.add_argument('source', type=Path)
+    coverage = commands.add_parser('coverage-report', help='Report current admitted coverage and raw diagnostics')
+    coverage.add_argument('--db', type=Path, required=True, help='Existing coverage SQLite database')
+    coverage.add_argument('--central', type=Path, help='Central dataset root with current .admission receipts')
+    coverage.add_argument('--catalog-dir', type=Path, help='Catalog directory, defaults to bundled catalogs')
+    export = commands.add_parser('export-training-index', help='Index currently admitted capture paths for the reader')
+    export.add_argument('--central', type=Path, required=True)
+    export.add_argument('--output', type=Path, required=True)
+    export.add_argument('--run-id', action='append', help='Restrict to these explicitly selected central runs; repeat for each')
     args = parser.parse_args()
+    if args.command == 'coverage-report':
+        import sqlite3
+        import tempfile
+        from .coverage import CoverageInventory
+        source_path = args.db.resolve(strict=True)
+        if not source_path.is_file(): raise ValueError('Coverage database must be an existing file')
+        with tempfile.TemporaryDirectory(prefix='vibrato-coverage-report-') as folder:
+            copied = Path(folder) / 'coverage.sqlite3'
+            source = sqlite3.connect(source_path.as_uri() + '?mode=ro', uri=True)
+            try:
+                dest = sqlite3.connect(copied)
+                try: source.backup(dest)
+                finally: dest.close()
+            finally: source.close()
+            inventory = CoverageInventory(copied, catalog_path=args.catalog_dir, central_dir=args.central)
+            print(json.dumps(inventory.snapshot(), indent=2))
+        return 0
+    if args.command == 'import-training-run':
+        from .training import import_run
+        print(json.dumps(import_run(args.source, args.config), indent=2))
+        return 0
+    if args.command == 'export-training-index':
+        from .training import export_index
+        index = export_index(args.central, args.output, args.run_id)
+        print(json.dumps({'acceptedRuns': len(index['accepted']), 'rejectedRuns': len(index['rejected']),
+                          'trainSessions': len(index['trainBases']), 'validationSessions': len(index['validationBases']),
+                          'splitReady': index['split']['ready'], 'output': str(args.output)}, indent=2))
+        return 0
     if args.command == 'serve':
         from .web import serve
         return serve(args.config, args.host, args.port, args.token_file)

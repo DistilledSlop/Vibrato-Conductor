@@ -15,9 +15,11 @@ from pathlib import Path
 
 from .storage import IDENTIFIER, atomic_json, digest, verify_manifest
 from .diagnostics import native_thread_failure, focused_activity_confirmed
+from .organize_proof import organize_server_confirmed
+from .lineage import lineage_admitted
 
 
-QUALITY_POLICY_VERSION = 3
+QUALITY_POLICY_VERSION = 4
 
 
 def capture_integrity(root: Path) -> bool:
@@ -46,7 +48,7 @@ def capture_integrity(root: Path) -> bool:
     return directions == {'C2S', 'S2C'}
 
 
-def quality_report(root: Path) -> dict:
+def quality_report(root: Path, admission_root: Path | None = None) -> dict:
     result = verify_manifest(root)
     metadata = json.loads((root / 'metadata.json').read_text())
     reasons = []
@@ -61,11 +63,18 @@ def quality_report(root: Path) -> dict:
                     reasons.append('worker_native_thread_exhausted')
                     break
                 overlap = data[-1024:]
+    world_metadata = metadata.get('world') or {}
+    if isinstance(world_metadata, dict) and world_metadata.get('earnedContext') is not None:
+        if not lineage_admitted(admission_root, world_metadata['earnedContext']):
+            reasons.append('earned_context_source_unconfirmed')
     assignment = metadata.get('assignment', '')
     if isinstance(assignment, str) and assignment.startswith('@activity '):
         try: activity = json.loads((root / 'activity-result.json').read_text())
         except (OSError, ValueError): activity = None
         if not focused_activity_confirmed(assignment, activity): reasons.append('focused_activity_goal_unconfirmed')
+        if assignment == '@activity organize_inventory' and not organize_server_confirmed(
+                root, activity, (metadata.get('identity') or {}).get('uuid')):
+            reasons.append('inventory_organize_server_unconfirmed')
     if metadata.get('mode') != 'collection': reasons.append('diagnostic_mode')
     if result.get('diagnosticPassed') is not True: reasons.append('diagnostic_failed')
     if result.get('taskSuccess') is not True: reasons.append('task_success_unconfirmed')
@@ -262,7 +271,7 @@ class ArtifactStore:
                 return dict(existing)
         result = verify_manifest(source)
         if result.get('runId') != run_id: raise ValueError('Artifact result does not match run directory identity')
-        quality = quality_report(source)
+        quality = quality_report(source, self.central_root / '.admission')
         manifest = json.loads((source / 'manifest.json').read_text())
         size = sum(row['bytes'] for row in manifest['files']) + (source / 'manifest.json').stat().st_size
         fingerprint = digest(source / 'manifest.json')
@@ -338,7 +347,7 @@ class ArtifactStore:
                     descriptor = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
                     try: os.fsync(descriptor)
                     finally: os.close(descriptor)
-                quality = quality_report(target)
+                quality = quality_report(target, self.central_root / '.admission')
                 atomic_json(self.central_root / '.admission' / (run_id + '.json'),
                             {'runId': run_id, 'manifestSha256': job['manifest_sha'],
                              'assessedWall': time.time(), 'quality': quality})
@@ -364,8 +373,30 @@ class ArtifactStore:
         """Upgrade cached admission decisions after a policy change in bounded batches."""
         with self.lock, self._db() as db:
             rows = db.execute("SELECT run_id,quality FROM deliveries WHERE state='delivered' ORDER BY queued_at").fetchall()
-        outdated = [row['run_id'] for row in rows
-                    if json.loads(row['quality']).get('policyVersion') != QUALITY_POLICY_VERSION]
+        def needs_upgrade(row):
+            version = json.loads(row['quality']).get('policyVersion')
+            # Old controller versions must not overwrite admission produced by
+            # a newer policy. Unversioned legacy decisions need an upgrade.
+            return version is None or (isinstance(version, int) and not isinstance(version, bool)
+                                       and version < QUALITY_POLICY_VERSION)
+        outdated = []
+        for row in rows:
+            cached = json.loads(row['quality'])
+            version = cached.get('policyVersion')
+            if isinstance(version, int) and not isinstance(version, bool) and version > QUALITY_POLICY_VERSION:
+                continue
+            if needs_upgrade(row):
+                outdated.append(row['run_id']); continue
+            metadata_path = self.central_root / row['run_id'] / 'metadata.json'
+            try:
+                metadata = json.loads(metadata_path.read_text())
+                lineage = (metadata.get('world') or {}).get('earnedContext')
+            except (OSError, ValueError, TypeError, AttributeError):
+                continue
+            if lineage is None: continue
+            current = lineage_admitted(self.central_root / '.admission', lineage)
+            was_current = 'earned_context_source_unconfirmed' not in cached.get('reasons', [])
+            if current != was_current: outdated.append(row['run_id'])
         return [self.reaudit(run_id) for run_id in outdated[:max(0, int(limit))]]
 
     def reaudit(self, run_id: str) -> dict:
@@ -374,10 +405,13 @@ class ArtifactStore:
         with self.lock, self._db() as db:
             row = db.execute('SELECT * FROM deliveries WHERE run_id=?', (run_id,)).fetchone()
             if row is None or row['state'] != 'delivered': raise ValueError('Run is not delivered')
+            prior_version = json.loads(row['quality']).get('policyVersion')
+            if isinstance(prior_version, int) and not isinstance(prior_version, bool) and prior_version > QUALITY_POLICY_VERSION:
+                raise ValueError('Cannot re-audit a decision made by a newer admission policy')
             root = self.central_root / run_id
             if root.is_symlink() or digest(root / 'manifest.json') != row['manifest_sha']:
                 raise ValueError('Delivered manifest identity changed')
-            quality = quality_report(root)
+            quality = quality_report(root, self.central_root / '.admission')
             audit = {'runId': run_id, 'manifestSha256': row['manifest_sha'], 'assessedWall': time.time(),
                      'previousQuality': json.loads(row['quality']), 'quality': quality}
             # Receipts live beside the run directories, outside their immutable manifests.

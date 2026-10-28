@@ -19,6 +19,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--id',required=True)
     parser.add_argument('--task',default='director')
+    parser.add_argument('--seed',type=int,default=424242,help='Seed supplied to the worker task planner')
     parser.add_argument('--seconds',type=float,default=60)
     parser.add_argument('--mode',choices=['diagnostic','collection'],default='diagnostic')
     parser.add_argument('--expect',choices=['healthy','eligible','task-timeout'],default='healthy')
@@ -32,16 +33,28 @@ def main():
     parser.add_argument('--operator',action='store_true')
     parser.add_argument('--operator-level',type=int,default=2)
     parser.add_argument('--render-threads',type=int,help='Explicit Mesa llvmpipe thread count; visual settings remain unchanged')
+    parser.add_argument('--enroll-config',type=Path,help='After strict validation, automatically deliver and index an independently eligible run')
+    parser.add_argument('--source-admissions',type=Path,help='Read-only central .admission directory for earned-context source checks')
     parser.add_argument('--accept-eula',action='store_true')
     parser.add_argument('--accept-offline',action='store_true')
     args=parser.parse_args()
     if not args.accept_eula or not args.accept_offline: parser.error('Explicit --accept-eula and --accept-offline are required')
+    if not -(2**63) <= args.seed < 2**63: parser.error('--seed must fit a signed 64-bit integer')
     if args.render_threads is not None and not 1 <= args.render_threads <= 64: parser.error('--render-threads must be1..64')
     state=args.state.resolve()
+    admission = args.source_admissions.resolve(strict=True) if args.source_admissions else None
+    if admission is not None and (admission.name != '.admission' or not admission.is_dir()):
+        parser.error('--source-admissions must be the central .admission directory')
+    if args.enroll_config:
+        enroll_central = Path(json.loads(args.enroll_config.read_text())['central_dir']).resolve()
+        if admission is not None and admission != enroll_central / '.admission':
+            parser.error('--source-admissions must match --enroll-config central directory')
+        admission = enroll_central / '.admission'
     config=FleetConfig.from_dict({
         'fleet_id':'telemetry-tests','state_dir':str(state/'control'),
         'artifacts_dir':str(state/'artifacts'),'workspace_dir':str(state/'workspaces'),
         'world_bank':str(args.world_bank.resolve()),'allow_world_copy':True,
+        **({'central_dir':str(admission.parent)} if admission is not None else {}),
         'image':args.image,'cpus':args.cpus,'memory_mb':args.memory_mb,'storage_mb':8192,
         'mode':args.mode,'seconds':args.seconds,'accept_eula':True,'accept_offline':True,
         'worker_env':{'GAMEMODE':args.gamemode,'OPERATOR':str(args.operator).lower(),'OP_PERMISSION_LEVEL':str(args.operator_level),'REQUESTED_CPUS':str(args.cpus),
@@ -51,7 +64,7 @@ def main():
     workspace=config.workspace_dir/args.id
     if artifacts.exists() or workspace.exists(): parser.error('Use a fresh --id; existing evidence is never overwritten')
     backend=DockerBackend(config)
-    spec={'runId':args.id,'task':args.task,'seconds':args.seconds,'seed':424242,'worldId':args.world_id,'gamemode':args.gamemode,'operator':args.operator,'operatorLevel':args.operator_level if args.operator else 0}
+    spec={'runId':args.id,'task':args.task,'seconds':args.seconds,'seed':args.seed,'worldId':args.world_id,'gamemode':args.gamemode,'operator':args.operator,'operatorLevel':args.operator_level if args.operator else 0}
     backend.create_worker(spec)
     print('Started '+backend.name(args.id),flush=True)
     print('Artifacts: '+str(artifacts),flush=True)
@@ -99,7 +112,7 @@ def main():
     if args.expect=='eligible':
         assert result['taskSuccess'] is True,json.dumps(result)
         assert result['datasetEligible'] is True,json.dumps(result)
-        assert quality_report(artifacts)['eligible'],json.dumps(quality_report(artifacts))
+        assert quality_report(artifacts, admission)['eligible'],json.dumps(quality_report(artifacts, admission))
         if args.task=='@get dirt 1':
             rows=[json.loads(line) for line in (artifacts/'heartbeats.jsonl').read_text().splitlines()]
             assert any(r.get('inventory',{}).get('minecraft:dirt',0)>=1 for r in rows),'No actual dirt inventory evidence'
@@ -108,6 +121,13 @@ def main():
         assert result['taskSuccess'] is False and not result['datasetEligible'],json.dumps(result)
         script=json.loads((artifacts/'script-result.json').read_text())
         assert any(c.get('action')==args.task and c.get('status')!='error' for c in script['commands']),'Assignment did not dispatch'
+    if args.enroll_config is not None:
+        quality = quality_report(artifacts, admission)
+        if quality['eligible']:
+            from conductor.training import import_run
+            print(json.dumps({'enrollment': import_run(artifacts, args.enroll_config)}), flush=True)
+        else:
+            print(json.dumps({'enrollment': 'excluded', 'reasons': quality['reasons']}), flush=True)
     print(json.dumps({'validated':args.expect,'runId':args.id,'result':result,'screenshot':{'width':width,'height':height,'updates':len(screenshot_times)}}),flush=True)
 
 

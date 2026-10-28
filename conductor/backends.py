@@ -43,6 +43,7 @@ def worker_env(config, spec):
     env.update({
         'RUN_ID': spec['runId'], 'SEED': str(spec['seed']), 'TASK': spec['task'],
         'RUN_SECONDS': str(spec['seconds']), 'PERF_MODE': config.perf,
+        'SOURCE_ADMISSIONS_DIR': '/source-admissions',
         'STARTUP_SECONDS': str(config.startup_timeout), 'MODE': config.mode,
         'ACCEPT_EULA': 'true' if config.accept_eula else 'false',
         'ACCEPT_OFFLINE': 'true' if config.accept_offline else 'false',
@@ -118,6 +119,10 @@ class DockerBackend:
         if config.memory_mb: argv += ['--memory', f'{config.memory_mb}m']
         if config.world_bank:
             argv += ['--mount', f'type=bind,src={config.world_bank},dst=/world-bank,readonly']
+        if config.central_dir:
+            admissions = config.central_dir / '.admission'
+            if admissions.is_dir() and not admissions.is_symlink():
+                argv += ['--mount', f'type=bind,src={admissions},dst=/source-admissions,readonly']
         for key, value in worker_env(config, spec).items(): argv += ['--env', f'{key}={value}']
         argv += [config.image]
         backend_id = command(argv).strip()

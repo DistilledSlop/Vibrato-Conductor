@@ -88,6 +88,9 @@ class Watchdog:
         self.settle_seconds = settle_seconds
         self.settle_started = None
         self.overload_since = {'server': None, 'client': None}
+        self.pillar_best_height = None
+        self.pillar_progress_at = None
+        self.last_pillar_at = None
 
     @staticmethod
     def assessment(reason, kind, confidence, **evidence):
@@ -155,7 +158,7 @@ class Watchdog:
                 return None
         semantic = (tuple(sorted(client.get('inventory', {}).items())), client.get('blocksBrokenCount'),
                     client.get('taskCompletedCount'), client.get('dimension'), client.get('experienceLevel'),
-                    client.get('experienceProgress'))
+                    client.get('experienceProgress'), client.get('cropGrowthCount'))
         description = ' '.join(str(client.get(k) or '') for k in ('rootClass', 'leafClass', 'leaf')).lower()
         chunk = tuple(client.get('chunk') or ())
         exploring = any(word in description for word in ('wander', 'explor', 'travel', 'locate', 'gettox', 'get2'))
@@ -169,6 +172,15 @@ class Watchdog:
         entry = {'time': now, 'position': client.get('position'), 'grounded': client.get('onGround'),
                  'pillarAttempts': client.get('pillarAttempts', 0), 'movement': client.get('movement')}
         self.history.append(entry)
+        if entry['movement'] == 'MovementPillar' and entry['position']:
+            height = entry['position'][1]
+            if (self.last_pillar_at is None or now - self.last_pillar_at > self.pillar_seconds
+                    or (now - self.last_pillar_at > 10 and height < self.pillar_best_height - 1.5)):
+                self.pillar_best_height, self.pillar_progress_at = height, now
+            elif height >= self.pillar_best_height + 1.5:
+                # Only a new high above ordinary jump height resets this clock.
+                self.pillar_best_height, self.pillar_progress_at = height, now
+            self.last_pillar_at = now
         no_progress = now - self.last_progress
         # A server or client under timing pressure cannot establish a behavior failure.
         if resources.get('memoryPressure') or (finite(client.get('tps')) and client['tps'] < 15): return None
@@ -197,7 +209,10 @@ class Watchdog:
         if len(pillar) >= 3 and pillar[-1]['time'] - pillar[0]['time'] >= self.pillar_seconds - 3:
             grounded_y = [p['position'][1] for p in pillar if p['grounded'] and p['position']]
             attempts = pillar[-1]['pillarAttempts'] - pillar[0]['pillarAttempts']
+            # Grounded-only samples miss airborne ascent. A new high must exceed
+            # ordinary jump height, and repeated returns to an old high do not reset it.
             if (attempts >= 5 and len(grounded_y) >= 3 and max(grounded_y) - min(grounded_y) < 0.8
+                    and self.pillar_progress_at is not None and now - self.pillar_progress_at >= self.pillar_seconds
                     and sum(p['movement'] == 'MovementPillar' for p in pillar) >= 3):
                 return self.assessment('nerd_pole_no_height_gain', 'behavior', 'inferred',
                                        pillarAttempts=attempts, groundedHeightRange=max(grounded_y)-min(grounded_y),
@@ -216,7 +231,7 @@ class Watchdog:
             return self.assessment('task_semantic_stall', 'behavior', 'inferred',
                                    leaf=client.get('leaf'), root=client.get('rootTask'),
                                    noSemanticProgressSeconds=no_progress,
-                                   semanticSignals=['inventory', 'block_breaks', 'completed_tasks', 'dimension', 'experience', 'novel_exploration_chunks'])
+                                   semanticSignals=['inventory', 'block_breaks', 'completed_tasks', 'dimension', 'experience', 'novel_exploration_chunks', 'observed_crop_growth'])
         return None
 
 

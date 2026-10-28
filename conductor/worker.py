@@ -18,9 +18,105 @@ from collections import deque
 from statistics import mean
 from pathlib import Path
 
-from .storage import atomic_json, artifact_manifest, stage_world
+from .storage import atomic_json, artifact_manifest, stage_world, world_revision, validate_earned_template, validate_earned_evidence
+from .organize_proof import organize_server_confirmed
+from .lineage import source_admitted
 from .evidence import snapshot_world
 from .diagnostics import IntervalRate, Watchdog, task_success, script_failure_reason, native_thread_failure, focused_activity_confirmed
+
+
+def capture_resume_metadata(bank: Path, world_id: str, world: dict, artifacts: Path,
+                            run_id: str, player_uuid: str) -> bool:
+    """Bind a resumed world's unchanged bank metadata into immutable run evidence."""
+    path = Path(bank) / world_id / 'world.json'
+    if not path.exists():
+        if world.get('sourceMetadataSha256') is not None:
+            raise ValueError('World metadata disappeared after staging')
+        return False
+    if path.is_symlink(): raise ValueError('Symlinked world metadata')
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != world.get('sourceMetadataSha256'):
+        raise ValueError('World metadata changed after staging')
+    metadata = json.loads(raw)
+    provenance = metadata.get('resumeProvenance') if isinstance(metadata, dict) else None
+    if provenance is None: return False
+    if (not isinstance(provenance, dict) or provenance.get('targetRun') != run_id
+            or provenance.get('targetUuid') != player_uuid):
+        raise ValueError('Resume provenance does not match worker identity')
+    (artifacts / 'source-world-metadata.json').write_bytes(raw)
+    return True
+
+
+def stage_earned_context(bank: Path, world_id: str, world: dict, staged: Path, artifacts: Path,
+                         run_id: str, player_uuid: str, gamemode: str, operator: bool, task: str,
+                         helper: Path = Path('/opt/conductor/migrate_player.js')) -> bool:
+    metadata_path = Path(bank) / world_id / 'world.json'
+    if not metadata_path.exists(): return False
+    if metadata_path.is_symlink(): raise ValueError('Symlinked world metadata')
+    raw = metadata_path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != world.get('sourceMetadataSha256'):
+        raise ValueError('World metadata changed after staging')
+    metadata = json.loads(raw)
+    template = validate_earned_template(metadata, world['revision'])
+    if template is None: return False
+    from .artifacts import QUALITY_POLICY_VERSION
+    validate_earned_evidence(Path(bank) / world_id, template, QUALITY_POLICY_VERSION)
+    if gamemode != 'survival' or operator: raise ValueError('Earned context requires non-operator survival')
+    if task != '@activity organize_inventory': raise ValueError('Earned context is restricted to the organize goal')
+    admission_dir = os.environ.get('SOURCE_ADMISSIONS_DIR')
+    if not source_admitted(Path(admission_dir) if admission_dir else None,
+                           template['sourceRun'], template['sourceManifestSha256']):
+        raise ValueError('Earned context source admission is missing, stale or revoked')
+    world['earnedContext'] = {'sourceRun': template['sourceRun'], 'sourceManifestSha256': template['sourceManifestSha256']}
+    source = Path(bank) / world_id / 'world'
+    baseline = world_revision(staged)
+    if baseline['revision'] != world['revision']: raise ValueError('Staged template revision changed')
+    result = subprocess.run(['node', str(helper), str(staged), template['sourceUuid'], player_uuid,
+                             json.dumps(template['sortProof'], separators=(',', ':'))],
+                            check=True, capture_output=True, text=True, timeout=60)
+    proof = json.loads(result.stdout)
+    if (proof.get('sourceUuid') != template['sourceUuid'] or proof.get('targetUuid') != player_uuid
+            or proof.get('uuidOnlyGameplayStateUnchanged') is not True or not isinstance(proof.get('files'), list)):
+        raise ValueError('Invalid identity migration proof')
+    files = proof['files']
+    expected_old = {'playerdata/' + template['sourceUuid'] + '.dat',
+                    'playerdata/' + template['sourceUuid'] + '.dat_old',
+                    'stats/' + template['sourceUuid'] + '.json', 'advancements/' + template['sourceUuid'] + '.json'}
+    expected_new = {path.replace(template['sourceUuid'], player_uuid) for path in expected_old}
+    old_records = {r['path']: r for r in baseline['files']}
+    migrated = world_revision(staged)
+    new_records = {r['path']: r for r in migrated['files']}
+    proof_files = {record.get('source'): record for record in files if isinstance(record, dict)}
+    if len(proof_files) != len(files) or set(proof_files) != (expected_old & old_records.keys()):
+        raise ValueError('Identity migration proof file set mismatch')
+    for old in expected_old:
+        new = old.replace(template['sourceUuid'], player_uuid)
+        if new in old_records or old in new_records or (old in old_records) != (new in new_records):
+            raise ValueError('Identity file migration incomplete or collided')
+        if old not in old_records: continue
+        record = proof_files[old]
+        if record.get('target') != new: raise ValueError('Identity migration target mismatch')
+        if old.startswith('playerdata/'):
+            if (record.get('onlyUuidChanged') is not True or record.get('sourceSha256') != old_records[old]['sha256']
+                    or record.get('targetSha256') != new_records[new]['sha256']):
+                raise ValueError('Player migration hash proof mismatch')
+        elif (record.get('onlyFilenameChanged') is not True or record.get('sha256') != old_records[old]['sha256']
+              or record.get('sha256') != new_records[new]['sha256']):
+            raise ValueError('Identity file rename proof mismatch')
+    if {k:v for k,v in old_records.items() if k not in expected_old} != {k:v for k,v in new_records.items() if k not in expected_new}:
+        raise ValueError('Migration changed nonidentity world files')
+    if world_revision(source)['revision'] != world['revision'] or hashlib.sha256(metadata_path.read_bytes()).hexdigest() != world['sourceMetadataSha256']:
+        raise ValueError('Source template changed during migration')
+    if not source_admitted(Path(admission_dir) if admission_dir else None,
+                           template['sourceRun'], template['sourceManifestSha256']):
+        raise ValueError('Earned context source admission changed during staging')
+    (artifacts / 'source-world-metadata.json').write_bytes(raw)
+    atomic_json(artifacts / 'earned-context-migration.json', {
+        'kind': template['kind'], 'runId': run_id, 'sourceRun': template['sourceRun'],
+        'sourceManifestSha256': template['sourceManifestSha256'], 'sourceWorldRevision': world['revision'],
+        'sourceMetadataSha256': world['sourceMetadataSha256'], 'stagedWorldRevision': migrated['revision'],
+        'sortProof': template['sortProof'], **proof})
+    return True
 
 
 def number(env: dict, key: str, default: float, minimum: float, maximum: float) -> float:
@@ -389,6 +485,10 @@ class Worker:
         world = {'id': None, 'mode': 'generated', 'seed': self.config.seed}
         if self.config.world_id:
             world = stage_world(Path('/world-bank'), self.config.world_id, server / 'world', self.config.allow_copy)
+            capture_resume_metadata(Path('/world-bank'), self.config.world_id, world, self.artifacts,
+                                    self.config.run_id, self.player_uuid)
+            stage_earned_context(Path('/world-bank'), self.config.world_id, world, server / 'world', self.artifacts,
+                                 self.config.run_id, self.player_uuid, self.config.gamemode, self.config.operator, self.config.task)
         (client / 'mods').symlink_to('/opt/game/mods', target_is_directory=True)
         # Baseline visuals by default; low rendering is explicit and recorded.
         (client / 'options.txt').write_text('onboardAccessibility:false\njoinedFirstServer:true\n'
@@ -606,6 +706,10 @@ class Worker:
             if not focused_activity_confirmed(self.config.task, activity):
                 success = False; ok = False
                 if reason == 'client_finished': reason = 'focused_activity_unconfirmed'
+            if self.config.task == '@activity organize_inventory' and not organize_server_confirmed(
+                    self.artifacts, activity, self.player_uuid):
+                success = False; ok = False
+                if reason == 'client_finished': reason = 'inventory_organize_server_unconfirmed'
         if reason != 'client_finished' or not script_ok: success = False if self.config.task != 'director' else None
         context_valid = bool(self.last_client and self.last_client.get('actualMode') == self.config.gamemode
                              and self.last_client.get('serverMode') == self.config.gamemode

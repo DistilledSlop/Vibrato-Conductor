@@ -195,6 +195,8 @@ class Fleet:
             );
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT, wall REAL NOT NULL,
                 kind TEXT NOT NULL, run_id TEXT, message TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS startup_milestones(
+                run_id TEXT NOT NULL, kind TEXT NOT NULL, PRIMARY KEY(run_id, kind));
         ''')
         with self.db:
             self.db.execute('INSERT OR IGNORE INTO settings VALUES (?,?)', ('desired', str(self.config.desired)))
@@ -224,6 +226,21 @@ class Fleet:
         self._next_eligible_wall = None
         self._last_capacity = None
         self._external_inhibition = None
+        self._startup_milestones = set(map(tuple, self.db.execute('SELECT run_id,kind FROM startup_milestones')))
+        self._last_reported_pause = None
+
+    def _milestone(self, run_id, kind, details):
+        key = (run_id, kind)
+        if key in self._startup_milestones: return
+        with self.db:
+            inserted = self.db.execute('INSERT OR IGNORE INTO startup_milestones VALUES (?,?)', key).rowcount
+            if inserted: self._event(kind, json.dumps(details, sort_keys=True), run_id)
+        self._startup_milestones.add(key)
+
+    def _report_pause(self):
+        if self._paused_reason != self._last_reported_pause:
+            with self.db: self._event('admission_pause_changed', json.dumps({'reason': self._paused_reason}))
+            self._last_reported_pause = self._paused_reason
 
     def _setting(self, key): return self.db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()[0]
     def _set(self, key, value): self.db.execute('UPDATE settings SET value=? WHERE key=?', (str(value), key))
@@ -378,6 +395,20 @@ class Fleet:
             if key == rolling and health.get(rolling + 'Samples', 0) < 10: return False
         return not health.get('classification')
 
+    def _cadence_pressure(self, row, now):
+        # Only fresh, fully sampled rolling rates of running workers gate new starts.
+        # Unhealthy/stopping workers retain their normal watchdog and replacement handling.
+        if row['state'] != 'running': return False
+        health = self._read_health(row['run_id'])
+        if not health or now - health['wall'] > self.config.health_timeout: return False
+        for side in ('client', 'server'):
+            value = health.get(side + 'MeanTps')
+            samples = health.get(side + 'MeanTpsSamples')
+            if (isinstance(samples, (int, float)) and samples >= 10
+                    and isinstance(value, (int, float)) and math.isfinite(value) and value < 18):
+                return True
+        return False
+
     def _artifact_roots(self, run_id):
         roots = [self.config.artifacts_dir / run_id]
         if self.config.central_dir is not None:
@@ -466,6 +497,7 @@ class Fleet:
         except Exception as error:
             with self.db: self._event('backend_error', str(error))
             self._paused_reason = 'backend_unavailable'
+            self._report_pause()
             return self.snapshot()
         backend = {v['runId']: v for v in discovered if v.get('runId')}
         with self.db:
@@ -541,6 +573,19 @@ class Fleet:
 
                 continue
             health = self._read_health(run_id)
+            if value['state'] == 'running':
+                self._milestone(run_id, 'runtime_running_observed', {'backendState': value['state']})
+            if health and 0 <= now - health['wall'] <= self.config.health_timeout:
+                for side, age_key in (('client', 'heartbeatAge'), ('server', 'serverHeartbeatAge')):
+                    age = health.get(age_key)
+                    rate = health.get(side + 'MeanTps')
+                    samples = health.get(side + 'MeanTpsSamples')
+                    if (isinstance(age, (int, float)) and math.isfinite(age) and 0 <= age and age + now - health['wall'] <= self.config.health_timeout
+                            and isinstance(rate, (int, float)) and math.isfinite(rate) and rate >= 18
+                            and isinstance(samples, (int, float)) and math.isfinite(samples) and samples >= 10):
+                        self._milestone(run_id, side + '_healthy_ticks_observed',
+                                        {'healthWall': health['wall'], 'heartbeatAge': age,
+                                         'meanTps': rate, 'samples': samples})
             with self.db:
                 self.db.execute('UPDATE workers SET backend_id=?,health=?,updated=? WHERE run_id=?',
                                 (value['backendId'], json.dumps(health) if health else None, now, run_id))
@@ -585,6 +630,8 @@ class Fleet:
             else:
                 state = ('running' if health and health.get('phase') == 'running'
                          and not self._warming_up(health) else 'starting')
+                if state == 'running' and row['state'] != 'running':
+                    self._milestone(run_id, 'startup_ready_observed', {'healthWall': health.get('wall')})
                 with self.db:
                     self.db.execute('UPDATE workers SET state=?,reason=NULL,unhealthy_since=NULL WHERE run_id=?', (state, run_id))
         self._last_capacity = self._capacity()
@@ -606,6 +653,12 @@ class Fleet:
         elif self._last_capacity['pressure']: self._paused_reason = self._last_capacity['pressure']
         elif now < float(self._setting('next_start')): self._paused_reason = 'failure_backoff'
         elif now - float(self._setting('last_start')) < self.config.stagger_seconds: self._paused_reason = 'startup_stagger'
+        elif any(row['state'] in ('pending', 'created', 'starting') for row in active):
+            # Loading a world and starting both JVMs is the most expensive part of a run.
+            # Wait for readiness or the existing startup timeout before starting another.
+            self._paused_reason = 'startup_warmup'
+        elif any(self._cadence_pressure(row, now) for row in active):
+            self._paused_reason = 'worker_tick_pressure'
         elif desired > self._last_capacity['limit']: self._paused_reason = 'resource_capacity_limit'
         if self._paused_reason in (None, 'resource_capacity_limit') and len(active) < min(desired, self._last_capacity['limit']):
             run_id = time.strftime('%Y%m%d%H%M%S', time.gmtime(now)) + '-' + uuid.uuid4().hex[:10]
@@ -617,6 +670,7 @@ class Fleet:
                 self._paused_reason = 'no_eligible_task'
                 self._next_eligible_wall = error.retry_at
                 self._cleanup()
+                self._report_pause()
                 return self.snapshot()
             with self.db:
                 self.db.execute('INSERT INTO workers(run_id,state,spec,created,updated) VALUES (?,?,?,?,?)',
@@ -634,6 +688,7 @@ class Fleet:
                     self._event('create_error', str(error), run_id)
                     self._record_failure(row, 'create_failed', now)
         self._cleanup()
+        self._report_pause()
         return self.snapshot()
 
     def _cleanup(self):

@@ -105,3 +105,19 @@ class WebTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+class CanaryServiceConfigurationTests(unittest.TestCase):
+    def test_service_config_reaches_scheduler_and_defaults_to_unrestricted(self):
+        from conductor.fleet import FleetConfig
+        from conductor.web import SERVICE_CONFIG_KEYS, scheduler_from_config
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            raw = {'state_dir': str(root), 'canary_tasks': ['get-oak_log'], 'max_active_canaries': 1}
+            config = FleetConfig.from_dict({k: v for k, v in raw.items() if k not in SERVICE_CONFIG_KEYS})
+            scheduler = scheduler_from_config(raw, config)
+            info = scheduler.snapshot()
+            self.assertEqual(info['canaryScheduling'], {'tasks':['get-oak_log'], 'maxActive':1})
+            task = next(t for t in info['targets'] if t['id'] == 'task:get-oak_log')
+            self.assertTrue(task['canary'])
+            default = scheduler_from_config({}, config)
+            self.assertEqual(default.snapshot()['canaryScheduling'], {'tasks':[], 'maxActive':0})

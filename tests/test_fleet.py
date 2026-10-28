@@ -82,6 +82,72 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(second['counts']['healthy'], 1)
         self.assertNotEqual(self.runtime.creates[0]['runId'], self.runtime.creates[1]['runId'])
 
+    def test_startup_milestones_are_fresh_and_once_across_restart(self):
+        self.fleet.set_target(1)
+        run_id = self.fleet.reconcile()['workers'][0]['runId']
+        self.health(run_id, clientMeanTps=20, serverMeanTps=20,
+                    clientMeanTpsSamples=10, serverMeanTpsSamples=10,
+                    wall=self.clock() - 11)
+        self.fleet.reconcile()
+        kinds = lambda: [r[0] for r in self.fleet.db.execute(
+            'SELECT kind FROM events WHERE run_id=?', (run_id,))]
+        self.assertIn('runtime_running_observed', kinds())
+        self.assertNotIn('client_healthy_ticks_observed', kinds())
+        self.health(run_id, clientMeanTps=20, serverMeanTps=20,
+                    clientMeanTpsSamples=10, serverMeanTpsSamples=10)
+        self.fleet.reconcile()
+        self.fleet.reconcile()
+        self.fleet.close()
+        self.fleet = Fleet(self.config, self.runtime, clock=self.clock)
+        self.fleet.reconcile()
+        for kind in ('runtime_running_observed', 'client_healthy_ticks_observed',
+                     'server_healthy_ticks_observed', 'startup_ready_observed'):
+            self.assertEqual(kinds().count(kind), 1)
+
+    def test_startup_waits_for_readiness_and_recovers_after_timeout(self):
+        self.fleet.set_target(2)
+        first = self.fleet.reconcile()['workers'][0]['runId']
+        self.clock.advance(5)
+        state = self.fleet.reconcile()
+        self.assertEqual(state['pausedReason'], 'startup_warmup')
+        self.assertEqual(len(self.runtime.creates), 1)
+        self.assertEqual(state['desired'], 2)
+        # A stuck startup is monitored and stopped, so it cannot hold the gate forever.
+        self.clock.advance(self.config.startup_timeout + 1)
+        self.fleet.reconcile()
+        self.clock.advance(self.config.unhealthy_grace_seconds + 1)
+        self.fleet.reconcile()
+        self.assertIn(first, self.runtime.stops)
+        self.fleet.reconcile()
+        self.clock.advance(self.config.failure_backoff_seconds + 1)
+        self.fleet.reconcile()
+        self.assertEqual(len(self.runtime.creates), 2)
+
+    def test_running_degraded_rolling_cadence_pauses_and_recovers_admission(self):
+        self.fleet.set_target(2)
+        first = self.fleet.reconcile()['workers'][0]['runId']
+        self.health(first, clientMeanTps=17, serverMeanTps=20,
+                    clientMeanTpsSamples=10, serverMeanTpsSamples=10)
+        self.clock.advance(5)
+        state = self.fleet.reconcile()
+        self.assertEqual(state['pausedReason'], 'worker_tick_pressure')
+        self.assertEqual(state['desired'], 2)
+        self.assertEqual(len(self.runtime.creates), 1)
+        self.health(first, clientMeanTps=20, serverMeanTps=20,
+                    clientMeanTpsSamples=10, serverMeanTpsSamples=10)
+        self.fleet.reconcile()
+        self.assertEqual(len(self.runtime.creates), 2)
+
+    def test_cadence_pressure_ignores_stale_or_undersampled_rates(self):
+        row = {'state': 'running', 'run_id': 'sample'}
+        sample = {'wall': self.clock(), 'clientMeanTps': 10, 'clientMeanTpsSamples': 9}
+        with patch.object(self.fleet, '_read_health', return_value=sample):
+            self.assertFalse(self.fleet._cadence_pressure(row, self.clock()))
+            sample['clientMeanTpsSamples'] = 10
+            self.assertTrue(self.fleet._cadence_pressure(row, self.clock()))
+            self.clock.advance(self.config.health_timeout + 1)
+            self.assertFalse(self.fleet._cadence_pressure(row, self.clock()))
+
     def test_scheduler_cooldown_pauses_admission_but_monitors_existing_workers(self):
         self.fleet.set_target(2)
         first = self.fleet.reconcile()['workers'][0]['runId']
@@ -372,6 +438,22 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(len(self.runtime.creates), 2)
         self.assertEqual(self.runtime.creates[1]['task_id'], 'director')
         self.assertEqual((self.fleet.config.max_workers, self.fleet.config.cpus, self.fleet.config.memory_mb), (0, 0, 0))
+
+    def test_canary_slot_limits_real_fleet_assignments_without_limiting_regular_starts(self):
+        inventory = CoverageInventory(self.root / 'canary.sqlite',
+            enabled_tasks=['get-oak_log'], canary_tasks=['get-oak_log'], max_active_canaries=1)
+        self.fleet.scheduler = inventory
+        self.fleet.set_target(2)
+        first = self.fleet.reconcile()['workers'][0]
+        self.assertEqual(first['assignment']['task_id'], 'get-oak_log')
+        inventory.enabled_tasks = {'get-oak_log', 'get-dirt'}
+        self.health(first['runId'])
+        self.clock.advance(5)
+        second = self.fleet.reconcile()
+        self.assertEqual(len(self.runtime.creates), 2)
+        self.assertEqual(self.runtime.creates[1]['task_id'], 'get-dirt')
+        self.assertEqual(second['desired'], 2)
+        self.assertIsNone(second['pausedReason'])
 
     def test_requested_fleet_larger_than_budget_starts_only_what_fits(self):
         self.fleet.set_target(3)

@@ -28,6 +28,70 @@ class StorageTests(unittest.TestCase):
             (source / 'link').symlink_to('/etc/passwd')
             with self.assertRaises(ValueError): stage_world(root / 'bank', 'forest', root / 'other', True)
 
+    def test_catalog_revision_cache_invalidates_tree_and_never_caches_staging(self):
+        import json
+        import conductor.storage as storage
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); bank = root / 'bank'; entry = bank / 'test'; world = entry / 'world'
+            world.mkdir(parents=True); (world / 'level.dat').write_bytes(b'level')
+            (entry / 'world.json').write_text(json.dumps({'tags': ['first']}))
+            cache = {}
+            with patch('conductor.storage.world_revision', wraps=storage.world_revision) as revision:
+                first = storage.inspect_world_bank(bank, cache)
+                self.assertEqual(revision.call_count, 1)
+                self.assertEqual(storage.inspect_world_bank(bank, cache)[0]['revision'], first[0]['revision'])
+                self.assertEqual(revision.call_count, 1)  # no world payload hashes on repeat
+                (entry / 'world.json').write_text(json.dumps({'tags': ['second']}))
+                self.assertEqual(storage.inspect_world_bank(bank, cache)[0]['tags'], ['second'])
+                self.assertEqual(revision.call_count, 1)
+                (world / 'extra').write_bytes(b'a')
+                changed = storage.inspect_world_bank(bank, cache)[0]['revision']
+                self.assertNotEqual(changed, first[0]['revision']); self.assertEqual(revision.call_count, 2)
+                (world / 'extra').write_bytes(b'b')
+                self.assertNotEqual(storage.inspect_world_bank(bank, cache)[0]['revision'], changed)
+                self.assertEqual(revision.call_count, 3)
+                (world / 'extra').unlink()
+                storage.inspect_world_bank(bank, cache); self.assertEqual(revision.call_count, 4)
+                (world / 'link').symlink_to('/etc/passwd')
+                self.assertFalse(storage.inspect_world_bank(bank, cache)[0]['supported'])
+                (world / 'link').unlink()
+                with patch('conductor.storage.subprocess.run', return_value=subprocess.CompletedProcess([], 1, '', 'unsupported')):
+                    storage.stage_world(bank, 'test', root / 'staged', True)
+                self.assertGreaterEqual(revision.call_count, 7)  # before/after/copy full hashes
+                import shutil
+                shutil.rmtree(entry)
+                self.assertEqual(storage.inspect_world_bank(bank, cache), [])
+                self.assertFalse(cache)
+
+    def test_catalog_cache_tracks_new_worlds_and_fresh_metadata_restrictions(self):
+        import json
+        import conductor.storage as storage
+        with tempfile.TemporaryDirectory() as tmp:
+            bank = Path(tmp) / 'bank'; first = bank / 'first'; world = first / 'world'
+            world.mkdir(parents=True); (world / 'level.dat').write_bytes(b'a')
+            (first / 'world.json').write_text(json.dumps({'allowOperator': True, 'gamemodes': ['survival']}))
+            cache = {}
+            storage.inspect_world_bank(bank, cache)
+            (first / 'world.json').write_text(json.dumps({'allowOperator': False, 'gamemodes': ['creative']}))
+            second = bank / 'second' / 'world'; second.mkdir(parents=True); (second / 'level.dat').write_bytes(b'b')
+            entries = {x['id']: x for x in storage.inspect_world_bank(bank, cache)}
+            self.assertEqual(set(entries), {'first', 'second'})
+            self.assertFalse(entries['first']['allowOperator'])
+            self.assertEqual(entries['first']['gamemodes'], ['creative'])
+            self.assertNotEqual(entries['first']['revision'], entries['second']['revision'])
+            self.assertEqual(len(cache), 2)
+
+    def test_cached_revision_rehashes_same_size_and_restored_mtime(self):
+        import os
+        import conductor.storage as storage
+        with tempfile.TemporaryDirectory() as tmp:
+            bank = Path(tmp) / 'bank'; world = bank / 'a' / 'world'; world.mkdir(parents=True)
+            level = world / 'level.dat'; level.write_bytes(b'aaaa'); before = level.stat()
+            cache = {}; first = storage.inspect_world_bank(bank, cache)[0]['revision']
+            level.write_bytes(b'bbbb'); os.utime(level, ns=(before.st_atime_ns, before.st_mtime_ns))
+            second = storage.inspect_world_bank(bank, cache)[0]['revision']
+            self.assertNotEqual(first, second)
+
     def test_manifest_detects_content_changes_and_excludes_itself(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

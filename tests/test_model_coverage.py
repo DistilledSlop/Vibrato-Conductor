@@ -4,7 +4,8 @@ import unittest
 from pathlib import Path
 
 from conductor.coverage import CoverageInventory
-from conductor.storage import artifact_manifest, atomic_json
+from conductor.storage import artifact_manifest, atomic_json, digest
+from conductor.artifacts import QUALITY_POLICY_VERSION
 
 
 OUTPUT = 'packet:play:clientbound:9'
@@ -29,7 +30,7 @@ class ModelCoverageTests(unittest.TestCase):
             {'id':INPUT,'state':'play','direction':'serverbound','wireId':36,'name':'block_dig','tier':'INPUT_ACK','role':'input'}]})
         atomic_json(catalog/'registries-1.21.1.json',{'items':['stone'],'blocks':[],'mobs':[],'entities':[]})
         (catalog/'obtainable-items.txt').write_text('stone\n')
-        return CoverageInventory(root/'coverage.sqlite',catalog_path=catalog)
+        return CoverageInventory(root/'coverage.sqlite',catalog_path=catalog,central_dir=root/'runs')
 
     def captured_run(self, root, run_id, *, success=True, dispatched=True, proof=None):
         run=root/run_id; captures=run/'captures'; captures.mkdir(parents=True)
@@ -48,6 +49,8 @@ class ModelCoverageTests(unittest.TestCase):
             atomic_json(run/'script-result.json',{'commands':[{'action':'@activity mining','status':'completed'}]})
         if proof is not None: atomic_json(run/'activity-result.json',proof)
         atomic_json(run/'manifest.json',artifact_manifest(run,result))
+        atomic_json(root/'.admission'/(run_id+'.json'), {'runId':run_id,'manifestSha256':digest(run/'manifest.json'),
+                    'quality':{'policyVersion':QUALITY_POLICY_VERSION,'eligible':True}})
         return run
 
     def proof(self, *, event=True, completed=True, goal=True):
@@ -117,7 +120,9 @@ class ModelCoverageTests(unittest.TestCase):
             root=Path(folder)
             tasks=[self.task('covered',[OUTPUT],[]),self.task('missing',[INPUT],[])]
             inventory=self.inventory(root,tasks)
+            run=self.captured_run(root/'runs','wire-evidence')
             with inventory._db() as db:
+                db.execute('INSERT INTO runs VALUES(?,?,?,?)',('wire-evidence',digest(run/'manifest.json'),0,'{}'))
                 db.execute('INSERT INTO observations VALUES(?,?,?,?)',('wire-evidence',OUTPUT,1,'[]'))
             self.assertEqual(inventory.choose('packet-deficit')['task_id'],'missing')
             tasks[0]['packet_targets']=['packet:play:clientbound:0']
