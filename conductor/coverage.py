@@ -48,6 +48,18 @@ class CoverageInventory:
         if self.task_failure_limit < 1 or not 0 <= self.task_cooldown_seconds <= 86400:
             raise ValueError('Invalid task failure cooldown settings')
         self.lock = threading.RLock()
+        self.protocol_manifest = json.loads((self.catalog_path / 'protocol-767.json').read_text())
+        raw_ids = {f'packet:{p["state"]}:{p["direction"]}:{p["id"]}' for p in self.protocol_manifest['packets']}
+        model_path = self.catalog_path / 'model-packets.json'
+        self.model_packet_catalog = json.loads(model_path.read_text()) if model_path.exists() else {'packets': []}
+        self.model_packets = {}
+        for packet in self.model_packet_catalog['packets']:
+            role = 'output' if packet['tier'] in ('MODEL', 'HYBRID') else 'input'
+            if (packet['tier'] not in ('MODEL','HYBRID','INPUT','INPUT_ACK') or packet['state'] != 'play'
+                    or packet['id'] not in raw_ids or packet['role'] != role
+                    or packet['id'] != f'packet:play:{packet["direction"]}:{packet["wireId"]}'):
+                raise ValueError('Invalid model packet classification: ' + str(packet.get('id')))
+            self.model_packets[packet['id']] = packet
         self.tasks = json.loads((self.catalog_path / 'tasks.json').read_text())['tasks']
         for task in self.tasks:
             task.setdefault('family', task['id'])
@@ -61,6 +73,14 @@ class CoverageInventory:
             if not isinstance(task['operator'], bool): raise ValueError('Task operator flag must be boolean')
             if isinstance(task['operatorLevel'], bool) or task['operatorLevel'] not in (1, 2, 3, 4):
                 raise ValueError('Task operatorLevel must be 1..4')
+            task.setdefault('packet_targets', [])
+            task.setdefault('mechanics', [])
+            if (not isinstance(task['packet_targets'], list)
+                    or any(not isinstance(p, str) or p not in self.model_packets for p in task['packet_targets'])):
+                raise ValueError('Task packet_targets must use canonical model-relevant Play packet IDs: ' + task['id'])
+            if (not isinstance(task['mechanics'], list) or any(not isinstance(m, str)
+                    or not re.fullmatch(r'[a-z][a-z0-9_-]{0,63}', m) for m in task['mechanics'])):
+                raise ValueError('Task mechanics must contain explicit mechanic IDs: ' + task['id'])
         self.enabled_tasks = set(enabled_tasks) if enabled_tasks is not None else None
         if self.enabled_tasks is not None:
             unknown = self.enabled_tasks - {t['id'] for t in self.tasks}
@@ -98,14 +118,16 @@ class CoverageInventory:
         def add(identifier, kind, label, supported, rule, details=None):
             db.execute('INSERT OR REPLACE INTO targets VALUES(?,?,?,?,?,?)',
                        (identifier, kind, label, int(supported), rule, json.dumps(details or {})))
-        manifest = json.loads((self.catalog_path / 'protocol-767.json').read_text())
+        manifest = self.protocol_manifest
         for packet in manifest['packets']:
             state = packet['state'].lower()
             # The raw proxy terminates login and never captures handshake/status; those remain requested gaps.
             supported = state in ('configuration', 'play')
+            model = self.model_packets.get(f'packet:{state}:{packet["direction"]}:{packet["id"]}', {})
             add(f'packet:{state}:{packet["direction"]}:{packet["id"]}', 'packet', packet['name'], supported,
                 'raw_packet_bytes_with_state_direction_and_wire_id',
                 {'state': state, 'direction': packet['direction'], 'wireId': packet['id'],
+                 'modelRelevant': bool(model), 'readerTier': model.get('tier'), 'modelRole': model.get('role'),
                  'unsupportedReason': None if supported else 'Recorder does not preserve this protocol phase completely'})
         registries = json.loads((self.catalog_path / 'registries-1.21.1.json').read_text())
         obtainable = set((self.catalog_path / 'obtainable-items.txt').read_text().splitlines())
@@ -168,6 +190,7 @@ class CoverageInventory:
         for task in self.tasks:
             details = {'command': task['command'], 'seconds': task['seconds'], 'gamemode': task['gamemode'],
                        'family': task['family'],
+                       'mechanics': task['mechanics'], 'packetTargets': task['packet_targets'],
                        'operator': task['operator'], 'operatorLevel': task['operatorLevel'], 'scenario': task.get('scenario'),
                        'requiresTags': task.get('requiresTags', []), 'unsupportedReason': task.get('unsupportedReason')}
             add('task:' + task['id'], 'task', task.get('description', task['id']), task['supported'],
@@ -178,6 +201,13 @@ class CoverageInventory:
             if task.get('scenario'):
                 add('scenario:' + task['scenario'], 'task', task['scenario'] + ' server-confirmed outcome', task['supported'],
                     'client_actions_plus_confirmed_server_observer', {**details, 'facet': 'scenario-outcome'})
+        for mechanic in sorted({m for task in self.tasks for m in task['mechanics']}):
+            declarations = [task for task in self.tasks if mechanic in task['mechanics']]
+            supported = any(task['supported'] and task['command'].startswith('@activity ') for task in declarations)
+            add('mechanic:' + mechanic, 'mechanic', mechanic, supported,
+                'explicit_action_proof_and_finite_task_outcome',
+                {'declaredBy': [task['id'] for task in declarations],
+                 'unsupportedReason': None if supported else 'No focused activity proof adapter is declared'})
 
     @staticmethod
     def _context_id(task_id, gamemode, operator):
@@ -240,7 +270,8 @@ class CoverageInventory:
                     if cooldown_until > now:
                         cooldown_deadlines.append(cooldown_until)
                         continue
-                    targets = ['task:' + task['id'], self._context_id(task['id'], task['gamemode'], task['operator']), *task.get('targets', [])]
+                    targets = list(dict.fromkeys(['task:' + task['id'], self._context_id(task['id'], task['gamemode'], task['operator']),
+                        *task.get('targets', []), *task['packet_targets'], *('mechanic:' + m for m in task['mechanics'])]))
                     deficit = sum(1 / (1 + counts.get(t, 0) + 2 * successes.get(t, 0)) for t in targets) / len(targets)
                     score = deficit / ((1 + assigned.get(task['id'], 0)) * (1 + task_health.get('consecutive_failures', 0)))
                     tie = hashlib.sha256(f'{self.seed}:{run_id}:{task["id"]}:{world.get("id")}'.encode()).hexdigest()
@@ -416,6 +447,29 @@ class CoverageInventory:
                             and operator_command.get('command')):
                         record('permission:operator-command-success', 'scenario:server_confirmed_command_result')
                         proven_interactions.add('permission:operator-command-success')
+            activity_path = run_dir / 'activity-result.json'
+            if task_seen and command and command.startswith('@activity ') and activity_path.exists():
+                try: activity = json.loads(activity_path.read_text())
+                except ValueError:
+                    unknown.add(('artifact', 'malformed_activity_result')); activity = {}
+                expected_activity = command.split()[1]
+                if (isinstance(activity, dict) and activity.get('activity') == expected_activity
+                        and activity.get('source') == 'focused_activity_task'):
+                    evidence = activity.get('evidence') or {}
+                    events = evidence.get('mechanics', []) if isinstance(evidence, dict) else []
+                    if isinstance(events, list):
+                        for event in events:
+                            if (not isinstance(event, dict) or event.get('id') not in task_definition['mechanics']
+                                    or event.get('actionObserved') is not True): continue
+                            source = event.get('source')
+                            if source == 'server_observer':
+                                if event.get('serverConfirmed') is not True: continue
+                            elif source != 'client_action_and_task_outcome': continue
+                            target = 'mechanic:' + event['id']
+                            record(target, 'activity:' + expected_activity + ':' + source)
+                            if (activity.get('status') == 'completed' and event.get('success') is True
+                                    and event.get('goalTaskFinished') is True):
+                                proven_interactions.add(target)
             for target, (count, evidence) in observed.items():
                 db.execute('INSERT INTO observations VALUES(?,?,?,?)', (run_id, target, count, json.dumps(sorted(evidence))))
             successful_targets = []
@@ -474,7 +528,41 @@ class CoverageInventory:
                 group = categories.setdefault(row['kind'], dict(requested=0, observed=0, successful=0, missing=0, unsupported=0))
                 group['requested'] += 1; group['observed'] += bool(observed_runs); group['successful'] += bool(success)
                 group['missing'] += not bool(observed_runs); group['unsupported'] += not supported
+            model_targets = [{**target, 'readerName': self.model_packets[target['id']]['name']}
+                             for target in targets if target['id'] in self.model_packets]
+            def packet_stats(rows):
+                return {'requested': len(rows), 'observed': sum(bool(row['observedRuns']) for row in rows),
+                        'missing': sum(not bool(row['observedRuns']) for row in rows),
+                        'missingTargets': [row['id'] for row in rows if not row['observedRuns']]}
+            by_task = defaultdict(dict)
+            for row in db.execute("""SELECT substr(t.target_id,6) AS task_id,p.target_id,
+                    COUNT(*) AS observed_runs,SUM(p.count) AS observations
+                    FROM observations t JOIN observations p ON p.run_id=t.run_id
+                    WHERE t.target_id LIKE 'task:%' AND p.target_id LIKE 'packet:%'
+                    GROUP BY t.target_id,p.target_id"""):
+                by_task[row['task_id']][row['target_id']] = {'id': row['target_id'],
+                    'observedRuns': row['observed_runs'], 'observations': row['observations']}
+            task_definitions = {task['id']: task for task in self.tasks}
+            task_packets = []
+            for task_id in sorted(task_definitions.keys() | by_task.keys()):
+                task = task_definitions.get(task_id, {})
+                actual = by_task.get(task_id, {})
+                requested = task.get('packet_targets', [])
+                task_packets.append({'taskId': task_id, 'family': task.get('family'),
+                    'packetTargets': requested, 'targetedObserved': [identifier for identifier in requested if identifier in actual],
+                    'rawPacketTypesObserved': len(actual),
+                    'packets': [{**value, 'readerTier': self.model_packets[identifier]['tier'],
+                                 'modelRole': self.model_packets[identifier]['role']}
+                                for identifier, value in sorted(actual.items()) if identifier in self.model_packets]})
+            model_coverage = {**packet_stats(model_targets), 'targets': model_targets,
+                'output': packet_stats([row for row in model_targets if row['modelRole'] == 'output']),
+                'input': packet_stats([row for row in model_targets if row['modelRole'] == 'input']),
+                'byTask': task_packets, 'source': self.model_packet_catalog.get('source'),
+                'evidenceRule': 'actual_raw_wire_presence_in_reader_relevant_Play_subset',
+                'limitations': ['Wire presence does not prove a HYBRID model-owned branch or a decoded training row',
+                    'Per-task packet counts describe runs with actual task dispatch; bootstrap/incidental traffic is included and causality is unproven']}
             return {'categories': categories, 'targets': targets, 'taskHealth': list(health.values()),
+                    'modelPacketCoverage': model_coverage,
                     'missing': [t['id'] for t in targets if not t['observedRuns']],
                     'unsupported': [t['id'] for t in targets if not t['supported']],
                     'assignments': db.execute('SELECT COUNT(*) FROM assignments').fetchone()[0],
