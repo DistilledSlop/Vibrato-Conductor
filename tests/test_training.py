@@ -41,7 +41,7 @@ class TrainingIntegrationTest(unittest.TestCase):
             config = root / 'config.json'
             atomic_json(config, {'fleet_id': 'test', 'state_dir': str(root / 'control'),
                 'artifacts_dir': str(root / 'spool'), 'workspace_dir': str(root / 'workspaces'),
-                'central_dir': str(root / 'central'), 'accept_eula': True, 'accept_offline': True})
+                'central_dir': str(root / 'central'), 'accept_eula': True, 'accept_offline': True, 'compact_retention': False})
             one = import_run(source, config)
             two = import_run(source, config)
             self.assertEqual(one, two)
@@ -55,6 +55,34 @@ class TrainingIntegrationTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'revoked'):
                 import_run(source, config)
             self.assertEqual(receipt.read_bytes(), saved)
+
+    def test_compact_import_default_protects_external_source_and_cleans_only_with_proof(self):
+        for proof in (False, True):
+            with self.subTest(proof=proof), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp); source = make_run(root / 'isolated', 'imported', 1)
+                (source / 'screenshot.png').write_bytes(b'image')
+                result = json.loads((source / 'result.json').read_text())
+                atomic_json(source / 'manifest.json', artifact_manifest(source, result))
+                original = digest(source / 'manifest.json')
+                config = root / 'config.json'
+                atomic_json(config, {'fleet_id': 'test', 'state_dir': str(root / 'control'),
+                    'artifacts_dir': str(root / 'spool'), 'workspace_dir': str(root / 'workspaces'),
+                    'central_dir': str(root / 'central'), 'accept_eula': True, 'accept_offline': True})
+                candidates = [{'runId': 'imported', 'state': 'managed_import', 'coverageIngested': True,
+                               'provenance': 'managed_import'}] if proof else []
+                with patch('conductor.training.migration_workers', return_value=candidates):
+                    first = import_run(source, config)
+                    self.assertEqual((root / 'spool/imported').exists(), not proof)
+                    second = import_run(source, config)
+                self.assertEqual(first, second)
+                self.assertEqual((root / 'spool/imported').exists(), not proof)
+                self.assertEqual(digest(source / 'manifest.json'), original)
+                self.assertTrue((source / 'screenshot.png').exists())
+                self.assertFalse((root / 'central/imported/screenshot.png').exists())
+                receipt = json.loads((root / 'central/.admission/imported.json').read_text())
+                self.assertEqual(receipt['sourceManifestSha256'], original)
+                self.assertTrue(receipt['quality']['eligible'])
+                self.assertEqual(len(export_index(root / 'central', root / 'index.json')['accepted']), 1)
 
     def test_export_obeys_current_receipts_rechecks_integrity_and_never_splits_world(self):
         with tempfile.TemporaryDirectory() as tmp:

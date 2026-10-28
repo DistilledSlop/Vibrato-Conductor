@@ -41,12 +41,13 @@ def scoped_file(root: Path, relative: str) -> Path:
 
 
 class Service:
-    def __init__(self, fleet, *, coverage=None, artifacts=None, interval=3, retention=None):
+    def __init__(self, fleet, *, coverage=None, artifacts=None, interval=3, retention=None, compact_after_wall=None):
         self.fleet = fleet
         self.coverage = coverage
         self.artifacts = artifacts
         self.interval = interval
         self.retention = retention
+        self.compact_after_wall = compact_after_wall
         self.last_retention = 0
         self.orphan_quiet = {}
         self.started = time.time()
@@ -90,14 +91,21 @@ class Service:
                         metadata={'assignment': worker.get('task'), 'seed': worker.get('seed')})
                     self.orphan_quiet.pop(run_id, None)
                 except Exception as error: errors.append(f'{run_id}: {error}')
+        eligible_workers = {w['runId'] for w in workers if self.compact_after_wall is not None
+                            and isinstance(w.get('createdWall'), (int, float))
+                            and not isinstance(w.get('createdWall'), bool)
+                            and w['createdWall'] >= self.compact_after_wall}
         for entry in root.iterdir() if root.exists() else []:
             if entry.is_dir() and not entry.is_symlink() and RUN_ID.fullmatch(entry.name) and (entry / 'manifest.json').is_file():
-                try: self.artifacts.enqueue(entry.name)
+                try:
+                    if entry.name in eligible_workers: self.artifacts.enqueue(entry.name, compact=True)
+                    else: self.artifacts.enqueue(entry.name)
                 except Exception as error: errors.append(f'{entry.name}: {error}')
         self.artifacts.deliver_pending(limit=4)
         if self.retention and time.monotonic() - self.last_retention > 60:
             self.last_retention = time.monotonic()
             active = [w['runId'] for w in workers if w['state'] not in ('failed', 'lost', 'cancelled', 'completed')]
+            self.artifacts.prune_compact(self.fleet.config.workspace_dir, workers)
             self.artifacts.prune_workspaces(self.fleet.config.workspace_dir, workers,
                 successful_days=self.retention['workspace_success_days'],
                 failure_days=self.retention['workspace_failure_days'], dry_run=False)
@@ -112,6 +120,15 @@ class Service:
             with self.lock: self.delivery_error = '; '.join(errors[:3])
 
     def tick(self):
+        guard = getattr(self.artifacts, 'history_guard', None)
+        if guard is None: return self._tick_locked()
+        from .artifacts import HistoryBusy
+        try:
+            with guard(): return self._tick_locked()
+        except HistoryBusy:
+            return
+
+    def _tick_locked(self):
         self.delivery_error = None
         try:
             try: self._deliver()
@@ -365,7 +382,7 @@ def load_token(path: Path) -> str:
 SERVICE_CONFIG_KEYS = {'max_buffer_bytes', 'enabled_tasks', 'canary_tasks', 'max_active_canaries',
                        'catalog_dir', 'delivery_retry_seconds', 'spool_success_days', 'spool_failure_days',
                        'central_diagnostic_days', 'central_failure_days', 'workspace_success_days',
-                       'workspace_failure_days', 'max_central_bytes'}
+                       'workspace_failure_days', 'max_central_bytes', 'compact_retention'}
 
 
 def scheduler_from_config(config_data, config):
@@ -390,7 +407,19 @@ def serve(config_path, host='0.0.0.0', port=8080, token_file=None):
                           max_buffer_bytes=int(config_data.get('max_buffer_bytes', 64 * 1024**3)),
                           retry_seconds=float(config_data.get('delivery_retry_seconds', 5)),
                           max_central_bytes=int(config_data.get('max_central_bytes', 1024**4)))
-    service = Service(fleet, coverage=inventory, artifacts=store,
+    compact_enabled = config_data.get('compact_retention', True)
+    if not isinstance(compact_enabled, bool): raise ValueError('compact_retention must be a boolean')
+    compact_after_wall = None
+    if compact_enabled:
+        if store.local_root == store.central_root: raise ValueError('Compact retention requires separate spool and central directories')
+        from .storage import atomic_json
+        cutoff_path = config.state_dir / 'compact-retention.json'
+        if not cutoff_path.exists(): atomic_json(cutoff_path, {'schemaVersion': 1, 'afterWall': time.time()})
+        cutoff = json.loads(cutoff_path.read_text())
+        compact_after_wall = cutoff.get('afterWall')
+        if cutoff.get('schemaVersion') != 1 or not isinstance(compact_after_wall, (int, float)) or isinstance(compact_after_wall, bool) or not (0 < compact_after_wall < float('inf')):
+            raise ValueError('Invalid persisted compact retention cutoff')
+    service = Service(fleet, coverage=inventory, artifacts=store, compact_after_wall=compact_after_wall,
                       interval=float(config_data.get('reconcile_seconds', 3)),
                       retention={name: float(config_data.get(name, default)) for name, default in [
                           ('spool_success_days', 7), ('spool_failure_days', 30),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 import fcntl
+from functools import wraps
 import math
 import os
 import re
@@ -20,6 +21,18 @@ from .lineage import lineage_admitted
 
 
 QUALITY_POLICY_VERSION = 4
+
+
+class HistoryBusy(ValueError):
+    """Another process or thread is changing artifact state."""
+
+
+def guarded_mutation(fn):
+    @wraps(fn)
+    def wrapped(self, *args, **kwargs):
+        with self.history_guard():
+            return fn(self, *args, **kwargs)
+    return wrapped
 
 
 def capture_integrity(root: Path) -> bool:
@@ -49,6 +62,9 @@ def capture_integrity(root: Path) -> bool:
 
 
 def quality_report(root: Path, admission_root: Path | None = None) -> dict:
+    if (root / 'validation-evidence.json').is_file():
+        from .compact import compact_quality
+        return compact_quality(root, admission_root)
     result = verify_manifest(root)
     metadata = json.loads((root / 'metadata.json').read_text())
     reasons = []
@@ -190,6 +206,8 @@ class ArtifactStore:
                 or not math.isfinite(self.retry_seconds) or self.retry_seconds < 0):
             raise ValueError('Invalid artifact buffering/retry settings')
         self.lock = threading.RLock()
+        self._history_lock = threading.RLock()
+        self._history_depth = threading.local()
         self.db_path = self.state_dir / 'delivery.sqlite'
         with self._db() as db:
             db.executescript('''CREATE TABLE IF NOT EXISTS deliveries (
@@ -198,6 +216,31 @@ class ArtifactStore:
                 error TEXT, queued_at REAL NOT NULL, delivered_at REAL, quality TEXT NOT NULL,
                 lease_until REAL NOT NULL DEFAULT 0);
             ''')
+            columns = {row[1] for row in db.execute('PRAGMA table_info(deliveries)')}
+            for name, kind in [('compact_requested', 'INTEGER NOT NULL DEFAULT 0'), ('compact_manifest_sha', 'TEXT')]:
+                if name not in columns: db.execute(f'ALTER TABLE deliveries ADD COLUMN {name} {kind}')
+
+    @contextmanager
+    def history_guard(self):
+        if not self._history_lock.acquire(blocking=False):
+            raise HistoryBusy('Artifact state is busy; retry')
+        try:
+            depth = getattr(self._history_depth, 'value', 0)
+            if depth:
+                self._history_depth.value = depth + 1
+                try: yield
+                finally: self._history_depth.value = depth
+            else:
+                with (self.state_dir / 'history.lock').open('a') as lease:
+                    try: fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    except BlockingIOError: raise HistoryBusy('Artifact state is busy; retry')
+                    self._history_depth.value = 1
+                    try: yield
+                    finally:
+                        self._history_depth.value = 0
+                        fcntl.flock(lease, fcntl.LOCK_UN)
+        finally:
+            self._history_lock.release()
 
     @contextmanager
     def _db(self):
@@ -208,6 +251,7 @@ class ArtifactStore:
             with db: yield db
         finally: db.close()
 
+    @guarded_mutation
     def quarantine_orphan(self, run_id: str, reason: str, *, terminal: bool = False, metadata: dict | None = None,
                           confidence: str = 'confirmed', classification: str | None = None) -> dict:
         """Finalize evidence after a confirmed terminal runtime death, never while a worker may still write.
@@ -255,7 +299,8 @@ class ArtifactStore:
             self._usage_at = 0
             return result
 
-    def enqueue(self, run_id: str) -> dict:
+    @guarded_mutation
+    def enqueue(self, run_id: str, compact: bool = False) -> dict:
         if not IDENTIFIER.fullmatch(run_id): raise ValueError('Invalid run id')
         source = self.local_root / run_id
         if source.is_symlink() or (source / 'manifest.json').is_symlink():
@@ -280,8 +325,8 @@ class ArtifactStore:
             if existing and existing['manifest_sha'] != fingerprint:
                 raise ValueError('Run id already queued with a different manifest')
             if not existing:
-                db.execute('INSERT INTO deliveries(run_id,manifest_sha,bytes,state,queued_at,quality) VALUES(?,?,?,?,?,?)',
-                           (run_id, fingerprint, size, 'queued', time.time(), json.dumps(quality)))
+                db.execute('INSERT INTO deliveries(run_id,manifest_sha,bytes,state,queued_at,quality,compact_requested) VALUES(?,?,?,?,?,?,?)',
+                           (run_id, fingerprint, size, 'queued', time.time(), json.dumps(quality), int(compact)))
             return dict(db.execute('SELECT * FROM deliveries WHERE run_id=?', (run_id,)).fetchone())
 
     def _copy(self, source: Path, stage: Path):
@@ -291,6 +336,7 @@ class ArtifactStore:
             if path.is_file():
                 with path.open('rb') as stream: os.fsync(stream.fileno())
 
+    @guarded_mutation
     def deliver_pending(self, limit: int = 4) -> list[dict]:
         # A process lock makes recovery immediate after a crash and prevents two pumps copying the same queue.
         with (self.state_dir / 'delivery.lock').open('a') as lease:
@@ -326,6 +372,13 @@ class ArtifactStore:
                 verify_manifest(source)
                 if digest(source / 'manifest.json') != job['manifest_sha']:
                     raise ValueError('Source manifest changed after queueing')
+                if job['compact_requested']:
+                    quality, compact_sha = self._deliver_compact(job, source, target, stage)
+                    with self.lock, self._db() as db:
+                        db.execute("UPDATE deliveries SET state='delivered',delivered_at=?,error=NULL,lease_until=0,quality=?,compact_manifest_sha=? WHERE run_id=?",
+                                   (time.time(), json.dumps(quality), compact_sha, run_id))
+                    outcomes.append({'runId': run_id, 'state': 'delivered', 'quality': quality})
+                    continue
                 if target.exists():
                     verify_manifest(target)
                     if digest(target / 'manifest.json') != job['manifest_sha']:
@@ -369,6 +422,74 @@ class ArtifactStore:
                 self._usage_at = 0
         return outcomes
 
+    def _deliver_compact(self, job, source, target, stage):
+        from .storage import artifact_manifest
+        run_id = job['run_id']
+        receipt_path = self.central_root / '.admission' / (run_id + '.json')
+        quality = quality_report(source, self.central_root / '.admission')
+        if quality['eligible']:
+            from .compact import build_compact
+            info = build_compact(source, stage, self.central_root / '.admission')
+            if info['sourceManifestSha256'] != job['manifest_sha'] or not info['quality']['eligible']:
+                raise ValueError('Compact source assessment changed')
+            quality = info['quality']
+            extra = {'evidenceSha256': info['evidenceSha256']}
+        else:
+            stage.mkdir(parents=True)
+            result = {'schemaVersion': 1, 'runId': run_id, 'reason': verify_manifest(source).get('reason', 'training_quality_excluded'),
+                      'diagnosticPassed': False, 'datasetEligible': False, 'taskSuccess': False}
+            source_metadata = json.loads((source / 'metadata.json').read_text())
+            atomic_json(stage / 'metadata.json', {'runId': run_id,
+                'assignment': source_metadata.get('assignment'), 'startedWall': source_metadata.get('startedWall')})
+            atomic_json(stage / 'result.json', result)
+            atomic_json(stage / 'manifest.json', artifact_manifest(stage, result))
+            extra = {}
+        verify_manifest(stage)
+        compact_sha = digest(stage / 'manifest.json')
+        if quality['eligible'] and compact_sha != info['compactManifestSha256']:
+            raise ValueError('Compact manifest identity changed')
+        receipt = {'runId': run_id, 'manifestSha256': compact_sha, 'sourceManifestSha256': job['manifest_sha'],
+                   'compactSchemaVersion': 1, 'assessedWall': time.time(), 'quality': quality, 'originalQuality': quality, **extra}
+        # A published target without a receipt is recovered only after rebuilding it
+        # from the independently reassessed, verified source and comparing identity.
+        if target.exists():
+            verify_manifest(target)
+            if digest(target / 'manifest.json') != compact_sha:
+                raise ValueError('Unreceipted compact target differs from reassessed source')
+            if receipt_path.exists():
+                existing_receipt = json.loads(receipt_path.read_text())
+                for key in ('runId', 'manifestSha256', 'sourceManifestSha256', 'compactSchemaVersion', 'quality', 'originalQuality'):
+                    if existing_receipt.get(key) != receipt.get(key): raise ValueError('Existing compact receipt conflicts with source assessment')
+                if extra and existing_receipt.get('evidenceSha256') != extra['evidenceSha256']:
+                    raise ValueError('Existing compact receipt evidence differs')
+            else:
+                atomic_json(receipt_path, receipt)
+            if quality['eligible'] and not quality_report(target, self.central_root / '.admission')['eligible']:
+                raise ValueError('Compact admission recheck failed')
+            return quality, compact_sha
+        # _usage includes the staged bytes, so this checks the actual compact size.
+        if self._usage(force=True)['centralBytes'] > self.max_central_bytes:
+            raise OSError('Central artifact byte limit reached')
+        for path in stage.rglob('*'):
+            if path.is_file():
+                with path.open('rb') as stream: os.fsync(stream.fileno())
+        for directory in sorted((p for p in stage.rglob('*') if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
+            descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+            try: os.fsync(descriptor)
+            finally: os.close(descriptor)
+        descriptor = os.open(stage, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(descriptor)
+        finally: os.close(descriptor)
+        stage.replace(target)
+        descriptor = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try: os.fsync(descriptor)
+        finally: os.close(descriptor)
+        atomic_json(receipt_path, receipt)
+        if quality['eligible'] and not quality_report(target, self.central_root / '.admission')['eligible']:
+            raise ValueError('Compact admission recheck failed')
+        return quality, compact_sha
+
+    @guarded_mutation
     def reaudit_outdated(self, limit: int = 2) -> list[dict]:
         """Upgrade cached admission decisions after a policy change in bounded batches."""
         with self.lock, self._db() as db:
@@ -399,6 +520,7 @@ class ArtifactStore:
             if current != was_current: outdated.append(row['run_id'])
         return [self.reaudit(run_id) for run_id in outdated[:max(0, int(limit))]]
 
+    @guarded_mutation
     def reaudit(self, run_id: str) -> dict:
         """Reassess delivered evidence under current rules without changing finalized artifacts."""
         if not IDENTIFIER.fullmatch(run_id): raise ValueError('Invalid run id')
@@ -409,10 +531,11 @@ class ArtifactStore:
             if isinstance(prior_version, int) and not isinstance(prior_version, bool) and prior_version > QUALITY_POLICY_VERSION:
                 raise ValueError('Cannot re-audit a decision made by a newer admission policy')
             root = self.central_root / run_id
-            if root.is_symlink() or digest(root / 'manifest.json') != row['manifest_sha']:
+            if root.is_symlink() or digest(root / 'manifest.json') != (row['compact_manifest_sha'] or row['manifest_sha']):
                 raise ValueError('Delivered manifest identity changed')
             quality = quality_report(root, self.central_root / '.admission')
-            audit = {'runId': run_id, 'manifestSha256': row['manifest_sha'], 'assessedWall': time.time(),
+            old_receipt = json.loads((self.central_root / '.admission' / (run_id + '.json')).read_text())
+            audit = {**old_receipt, 'runId': run_id, 'manifestSha256': row['compact_manifest_sha'] or row['manifest_sha'], 'assessedWall': time.time(),
                      'previousQuality': json.loads(row['quality']), 'quality': quality}
             # Receipts live beside the run directories, outside their immutable manifests.
             atomic_json(self.central_root / '.admission' / (run_id + '.json'), audit)
@@ -464,6 +587,185 @@ class ArtifactStore:
                 'delivered': sum(r['state'] == 'delivered' for r in rows),
                 'eligible': sum(r['state'] == 'delivered' and r['quality']['eligible'] for r in rows)}
 
+    @guarded_mutation
+    def migrate_history(self, workers, workspace_root: Path, *, limit: int = 10, apply: bool = False) -> dict:
+        """Coordinate with the entire controller tick and the delivery lease."""
+        selected = workers() if callable(workers) else workers
+        return self._migrate_history(selected, workspace_root, limit=limit, apply=apply)
+
+    def _migrate_history(self, workers, workspace_root: Path, *, limit: int = 10, apply: bool = False) -> dict:
+        """Plan or resume bounded historical conversion under the delivery lease."""
+        if not 1 <= limit <= 1000: raise ValueError('Migration limit out of range')
+        if self.local_root == self.central_root: raise ValueError('Migration requires separate spool and central')
+        known = {w['runId']: w for w in workers if isinstance(w.get('runId'), str)
+                 and IDENTIFIER.fullmatch(w['runId'])}
+        journal_root = self.state_dir / 'history-migrations'
+        backup_root = self.central_root / '.history-backup'
+        results = {'candidates': [], 'blocked': [], 'migrated': []}
+        with (self.state_dir / 'delivery.lock').open('a') as lease:
+            try: fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError: raise ValueError('Delivery is busy; retry migration')
+            try:
+                for row in self.snapshot()['runs']:
+                    run_id = row['run_id']
+                    worker = known.get(run_id)
+                    journal_path = journal_root / (run_id + '.json')
+                    pending = journal_path.exists()
+                    if row['state'] != 'delivered' or (row.get('compact_requested') and not pending): continue
+                    if len(results['candidates']) >= limit: break
+                    try:
+                        if not worker or (worker.get('state') not in {'completed', 'failed', 'lost', 'cancelled'}
+                                and not (worker.get('state') == 'managed_import' and worker.get('provenance') == 'managed_import')):
+                            raise ValueError('unknown or nonterminal fleet worker')
+                        if not worker.get('coverageIngested'): raise ValueError('coverage not ingested')
+                        target, backup = self.central_root / run_id, backup_root / run_id
+                        receipt_path = self.central_root / '.admission' / (run_id + '.json')
+                        if journal_path.is_symlink() or backup_root.is_symlink() or target.is_symlink() or backup.is_symlink() or receipt_path.is_symlink():
+                            raise ValueError('symlink in migration path')
+                        if pending:
+                            journal = json.loads(journal_path.read_text())
+                            if journal.get('runId') != run_id or journal.get('sourceManifestSha256') != row['manifest_sha']:
+                                raise ValueError('migration journal identity mismatch')
+                            prior_receipt = journal['receipt']
+                            if receipt_path.exists():
+                                current = json.loads(receipt_path.read_text())
+                                if current != prior_receipt:
+                                    if (current.get('runId') != run_id or current.get('compactSchemaVersion') != 1
+                                            or current.get('sourceManifestSha256') != row['manifest_sha']
+                                            or current.get('originalQuality') != prior_receipt.get('quality')
+                                            or current.get('quality') != prior_receipt.get('quality')
+                                            or not target.is_dir() or target.is_symlink()
+                                            or current.get('manifestSha256') != digest(target / 'manifest.json')):
+                                        raise ValueError('admission changed during migration; preserving current decision')
+                                    verify_manifest(target)
+                                    if current['quality'].get('eligible') and not quality_report(target, self.central_root / '.admission')['eligible']:
+                                        raise ValueError('current compact admission is not eligible')
+                        if pending and row.get('compact_requested') and not backup.exists():
+                            completed_journal = json.loads(journal_path.read_text())
+                            if completed_journal.get('runId') != run_id or completed_journal.get('sourceManifestSha256') != row['manifest_sha']:
+                                raise ValueError('migration journal identity mismatch')
+                            verify_manifest(target)
+                            receipt = json.loads(receipt_path.read_text())
+                            if (digest(target / 'manifest.json') != row.get('compact_manifest_sha')
+                                    or receipt.get('sourceManifestSha256') != row['manifest_sha']
+                                    or receipt.get('manifestSha256') != row['compact_manifest_sha']):
+                                raise ValueError('completed migration identity mismatch')
+                            results['candidates'].append({'runId': run_id, 'sourceBytes': 0, 'eligible': row['quality']['eligible'], 'resuming': True})
+                            if apply:
+                                journal_path.unlink()
+                                results['migrated'].append(run_id)
+                            continue
+                        if pending:
+                            journal = json.loads(journal_path.read_text())
+                            if journal.get('runId') != run_id or journal.get('sourceManifestSha256') != row['manifest_sha']:
+                                raise ValueError('migration journal identity mismatch')
+                            prior = journal['receipt']
+                            source = backup if backup.exists() else target
+                        else:
+                            source = target
+                            prior = json.loads(receipt_path.read_text())
+                        verify_manifest(source)
+                        if digest(source / 'manifest.json') != row['manifest_sha']:
+                            raise ValueError('original central manifest identity mismatch')
+                        if prior.get('runId') != run_id or prior.get('manifestSha256') != row['manifest_sha']:
+                            raise ValueError('original admission receipt identity mismatch')
+                        quality = quality_report(source, self.central_root / '.admission')
+                        if quality != prior.get('quality'):
+                            raise ValueError('original admission is stale or changed')
+                        size = sum(p.stat().st_size for p in source.rglob('*') if p.is_file() and not p.is_symlink())
+                        results['candidates'].append({'runId': run_id, 'sourceBytes': size, 'eligible': quality['eligible'], 'resuming': pending})
+                        if not apply: continue
+                        journal_root.mkdir(parents=True, exist_ok=True)
+                        backup_root.mkdir(parents=True, exist_ok=True)
+                        if not pending:
+                            atomic_json(journal_path, {'schemaVersion': 1, 'runId': run_id,
+                                'sourceManifestSha256': row['manifest_sha'], 'receipt': prior})
+                        if not backup.exists():
+                            receipt_path.unlink(missing_ok=True)
+                            descriptor = os.open(receipt_path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                            try: os.fsync(descriptor)
+                            finally: os.close(descriptor)
+                            target.rename(backup)
+                            for directory in (backup_root, self.central_root):
+                                descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+                                try: os.fsync(descriptor)
+                                finally: os.close(descriptor)
+                        stage = self.central_root / '.incoming' / (run_id + '-' + uuid.uuid4().hex)
+                        try:
+                            compact_quality_value, compact_sha = self._deliver_compact(row, backup, target, stage)
+                        finally:
+                            if stage.exists(): shutil.rmtree(stage)
+                        with self.lock, self._db() as db:
+                            db.execute("UPDATE deliveries SET compact_requested=1,compact_manifest_sha=?,quality=? WHERE run_id=? AND state='delivered' AND manifest_sha=?",
+                                       (compact_sha, json.dumps(compact_quality_value), run_id, row['manifest_sha']))
+                        self.prune_compact(workspace_root, [worker])
+                        verify_manifest(target)
+                        receipt = json.loads(receipt_path.read_text())
+                        if receipt.get('sourceManifestSha256') != row['manifest_sha'] or receipt.get('manifestSha256') != compact_sha:
+                            raise ValueError('compact receipt changed during migration')
+                        if compact_quality_value['eligible'] and not quality_report(target, self.central_root / '.admission')['eligible']:
+                            raise ValueError('compact quality changed during migration')
+                        shutil.rmtree(backup)
+                        journal_path.unlink()
+                        results['migrated'].append(run_id)
+                    except (OSError, ValueError, KeyError, TypeError) as error:
+                        results['blocked'].append({'runId': run_id, 'reason': str(error)})
+                self._usage_at = 0
+                return results
+            finally: fcntl.flock(lease, fcntl.LOCK_UN)
+
+    @guarded_mutation
+    def prune_compact(self, workspace_root: Path | None, workers) -> list[str]:
+        """Remove temporary files only after a compact terminal delivery is verified."""
+        if self.local_root == self.central_root: return []
+        if workspace_root is not None:
+            workspace_root = Path(workspace_root)
+            if workspace_root.is_symlink(): raise ValueError('Unsafe workspace root')
+            workspace_root = workspace_root.resolve()
+        rows = {r['run_id']: r for r in self.snapshot()['runs']}
+        removed = []
+        for worker in workers:
+            run_id = worker.get('runId', '')
+            if not isinstance(run_id, str) or not IDENTIFIER.fullmatch(run_id): continue
+            if (worker.get('state') not in {'completed', 'failed', 'lost', 'cancelled'}
+                    and not (worker.get('state') == 'managed_import' and worker.get('provenance') == 'managed_import')): continue
+            if not worker.get('coverageIngested'): continue
+            row = rows.get(run_id)
+            if not row or row['state'] != 'delivered' or not row.get('compact_requested') or not row.get('compact_manifest_sha'): continue
+            target = self.central_root / run_id
+            receipt = json.loads((self.central_root / '.admission' / (run_id + '.json')).read_text())
+            verify_manifest(target)
+            if (digest(target / 'manifest.json') != row['compact_manifest_sha']
+                    or receipt.get('runId') != run_id or receipt.get('manifestSha256') != row['compact_manifest_sha']
+                    or receipt.get('sourceManifestSha256') != row['manifest_sha']
+                    or receipt.get('quality') != row['quality']):
+                raise ValueError('Compact receipt or identity mismatch')
+            if row['quality']['eligible'] and not quality_report(target, self.central_root / '.admission')['eligible']:
+                raise ValueError('Compact quality recheck failed')
+            source = self.local_root / run_id
+            if source.exists():
+                verify_manifest(source)
+                if digest(source / 'manifest.json') != row['manifest_sha']:
+                    raise ValueError('Source identity changed before cleanup')
+            roots = (self.local_root,) if workspace_root is None else (self.local_root, workspace_root)
+            for root in roots:
+                path, tombstone = root / run_id, root / ('.compact-delete-' + run_id)
+                if tombstone.is_symlink() or path.is_symlink(): raise ValueError('Unsafe cleanup path')
+                if path.exists():
+                    if not path.is_dir() or path.resolve().parent != root or tombstone.exists():
+                        raise ValueError('Unsafe or conflicting cleanup path')
+                    path.rename(tombstone)
+                    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+                    try: os.fsync(descriptor)
+                    finally: os.close(descriptor)
+                if tombstone.exists():
+                    if not tombstone.is_dir() or tombstone.resolve().parent != root: raise ValueError('Unsafe cleanup tombstone')
+                    shutil.rmtree(tombstone)
+            removed.append(run_id)
+        self._usage_at = 0
+        return removed
+
+    @guarded_mutation
     def prune(self, active_run_ids=(), successful_days: float = 7, failure_days: float = 30,
               now: float | None = None, dry_run: bool = True) -> list[str]:
         """Prune only delivered local spools; central evidence is retained independently."""
@@ -476,7 +778,7 @@ class ArtifactStore:
         candidates = []
         for row in self.snapshot()['runs']:
             run_id = row['run_id']
-            if run_id in active or row['state'] != 'delivered': continue
+            if run_id in active or row['state'] != 'delivered' or row.get('compact_requested'): continue
             age = now - row['delivered_at']
             days = successful_days if row['quality']['diagnosticPassed'] and row['quality']['taskSuccess'] is not False else failure_days
             source, target = self.local_root / run_id, self.central_root / run_id
@@ -493,6 +795,7 @@ class ArtifactStore:
         return candidates
 
 
+    @guarded_mutation
     def prune_central(self, active_run_ids=(), diagnostic_days: float = 30, failure_days: float = 90,
                       now: float | None = None, dry_run: bool = True) -> list[str]:
         """Expire delivered diagnostic evidence after explicit retention periods; training data is protected.
@@ -508,7 +811,7 @@ class ArtifactStore:
         removed = []
         for row in self.snapshot()['runs']:
             run_id = row['run_id']
-            if run_id in active or row['state'] != 'delivered' or row['quality']['eligible']: continue
+            if run_id in active or row['state'] != 'delivered' or row.get('compact_requested') or row['quality']['eligible']: continue
             passed = row['quality']['diagnosticPassed'] and row['quality']['taskSuccess'] is not False
             days = diagnostic_days if passed else failure_days
             if now - row['delivered_at'] < days * 86400: continue
@@ -531,6 +834,7 @@ class ArtifactStore:
                 self._usage_at = 0
         return removed
 
+    @guarded_mutation
     def prune_workspaces(self, workspace_root: Path, workers, successful_days: float = 1,
                          failure_days: float = 7, dry_run: bool = True, now: float | None = None) -> list[str]:
         """Remove only retained, definitively terminal, centrally verified worker worlds.
@@ -553,7 +857,7 @@ class ArtifactStore:
             if not isinstance(run_id, str) or not IDENTIFIER.fullmatch(run_id): continue
             if worker.get('state') not in {'completed', 'failed', 'lost', 'cancelled'}: continue
             receipt = receipts.get(run_id)
-            if receipt is None or receipt['state'] != 'delivered': continue
+            if receipt is None or receipt['state'] != 'delivered' or receipt.get('compact_requested'): continue
             passed = receipt['quality']['diagnosticPassed'] and receipt['quality']['taskSuccess'] is not False
             days = successful_days if passed else failure_days
             terminal_at = worker.get('updatedWall', worker.get('updated', receipt['delivered_at']))

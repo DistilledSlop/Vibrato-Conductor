@@ -10,11 +10,15 @@ import json
 import os
 import shutil
 import tempfile
+import sqlite3
 from pathlib import Path
 
 from .artifacts import ArtifactStore, QUALITY_POLICY_VERSION, quality_report
 from .coverage import CoverageInventory
 from .fleet import FleetConfig
+from .lineage import source_admitted
+from .backends import BackendError
+from .history import migration_workers
 from .storage import IDENTIFIER, atomic_json, digest, verify_manifest
 
 
@@ -22,7 +26,9 @@ def import_run(source: Path, config_path: Path) -> dict:
     config_data = json.loads(Path(config_path).read_text())
     service_keys = {'max_buffer_bytes', 'enabled_tasks', 'canary_tasks', 'max_active_canaries', 'catalog_dir', 'delivery_retry_seconds',
                     'spool_success_days', 'spool_failure_days', 'central_diagnostic_days', 'central_failure_days',
-                    'workspace_success_days', 'workspace_failure_days', 'max_central_bytes'}
+                    'workspace_success_days', 'workspace_failure_days', 'max_central_bytes', 'compact_retention'}
+    compact_enabled = config_data.get('compact_retention', True)
+    if not isinstance(compact_enabled, bool): raise ValueError('compact_retention must be a boolean')
     fleet = FleetConfig.from_dict({k: v for k, v in config_data.items() if k not in service_keys})
     if fleet.central_dir is None:
         raise ValueError('Import requires central_dir')
@@ -43,9 +49,9 @@ def import_run(source: Path, config_path: Path) -> dict:
             raise ValueError('Existing central run lacks a matching admission receipt')
         verify_manifest(existing_target)
         prior = json.loads(existing_receipt.read_text())
-        if (digest(existing_target / 'manifest.json') != fingerprint or prior.get('runId') != run_id
-                or prior.get('manifestSha256') != fingerprint or prior.get('quality', {}).get('policyVersion') != QUALITY_POLICY_VERSION
-                or prior.get('quality', {}).get('eligible') is not True):
+        if (prior.get('runId') != run_id or prior.get('manifestSha256') != digest(existing_target / 'manifest.json')
+                or not source_admitted(fleet.central_dir / '.admission', run_id, fingerprint)
+                or not quality_report(existing_target, fleet.central_dir / '.admission').get('eligible')):
             raise ValueError('Existing central admission is stale, revoked or inconsistent')
     spool = fleet.artifacts_dir.resolve()
     spool.mkdir(parents=True, exist_ok=True)
@@ -78,7 +84,7 @@ def import_run(source: Path, config_path: Path) -> dict:
     # to enroll coverage: redelivery could replace an independent revocation.
     target = fleet.central_dir / run_id
     if not target.exists():
-        store.enqueue(run_id)
+        store.enqueue(run_id, compact=compact_enabled)
         store.deliver_pending(limit=1)
     else:
         with store._db() as db:
@@ -88,19 +94,31 @@ def import_run(source: Path, config_path: Path) -> dict:
     if not target.is_dir():
         raise ValueError('Delivery is pending; retry the import after the delivery queue recovers')
     verify_manifest(target)
-    if digest(target / 'manifest.json') != fingerprint:
+    target_fingerprint = digest(target / 'manifest.json')
+    if not source_admitted(fleet.central_dir / '.admission', run_id, fingerprint):
         raise ValueError('Central run conflicts with source manifest')
     # Do not promote a previously revoked or stale central receipt implicitly.
     receipt = json.loads((fleet.central_dir / '.admission' / (run_id + '.json')).read_text())
-    if (receipt.get('manifestSha256') != fingerprint or receipt.get('quality', {}).get('policyVersion') != QUALITY_POLICY_VERSION
+    if (receipt.get('manifestSha256') != target_fingerprint or receipt.get('quality', {}).get('policyVersion') != QUALITY_POLICY_VERSION
             or receipt.get('quality', {}).get('eligible') is not True):
         raise ValueError('Central admission is stale, revoked or inconsistent')
     inventory = CoverageInventory(fleet.state_dir / 'coverage.sqlite3', catalog_path=config_data.get('catalog_dir'),
                                   enabled_tasks=config_data.get('enabled_tasks'), world_bank=fleet.world_bank, seed=fleet.seed,
                                   canary_tasks=config_data.get('canary_tasks'),
                                   max_active_canaries=config_data.get('max_active_canaries', 0), central_dir=fleet.central_dir)
-    inventory.ingest(target)
-    return {'runId': run_id, 'manifestSha256': fingerprint, 'quality': receipt['quality'], 'central': str(target), 'coverageIngested': True}
+    # Ingest the full source before pruning; its identity is the managed-import proof.
+    inventory.ingest(dest)
+    if source != dest and receipt.get('compactSchemaVersion') is not None:
+        try:
+            with store.history_guard():
+                candidates = migration_workers(fleet, store, include_imports=True)
+                match = [candidate for candidate in candidates if candidate.get('runId') == run_id
+                         and candidate.get('provenance') == 'managed_import']
+                if match: store.prune_compact(None, match)
+        except (OSError, ValueError, sqlite3.Error, BackendError):
+            # Missing authoritative runtime/fleet evidence leaves the spool protected.
+            pass
+    return {'runId': run_id, 'manifestSha256': target_fingerprint, 'quality': receipt['quality'], 'central': str(target), 'coverageIngested': True}
 
 
 def export_index(central: Path, output: Path, run_ids: list[str] | None = None) -> dict:

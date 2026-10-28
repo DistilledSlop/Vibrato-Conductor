@@ -78,6 +78,7 @@ class FleetConfig:
     kube_context: str | None = None
     cluster_endpoint: str | None = None
     artifacts_pvc: str = 'vibrato-artifacts'
+    central_pvc: str | None = None
     world_bank_pvc: str | None = None
 
     @classmethod
@@ -130,7 +131,8 @@ class FleetConfig:
         if config.world_ids and not (config.world_bank or config.world_bank_pvc):
             raise ValueError('world_ids require a world bank')
         if config.backend == 'kubernetes':
-            for name in ('namespace', 'artifacts_pvc'):
+            for name in ('namespace', 'artifacts_pvc', 'central_pvc', 'world_bank_pvc'):
+                if getattr(config, name) is None and name in ('central_pvc', 'world_bank_pvc'): continue
                 if not re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,62}', getattr(config, name)):
                     raise ValueError(f'Invalid Kubernetes {name}')
         return config
@@ -716,7 +718,7 @@ class Fleet:
                                 'assignment': spec, 'createdWall': row['created'], 'updatedWall': row['updated'],
                                 'reason': row['reason'], 'health': health, 'healthy': self._healthy(health, row['state']), 'result': result,
                                 'artifacts': str(self.config.artifacts_dir / row['run_id']),
-                                'artifactsVerified': bool(row['finalized']), 'removed': bool(row['removed'])})
+                                'artifactsVerified': bool(row['finalized']), 'coverageIngested': bool(row['ingested']), 'removed': bool(row['removed'])})
             counts = {name: sum(w['state'] == name for w in workers) for name in sorted(ACTIVE | TERMINAL)}
             counts['healthy'] = sum(w['healthy'] for w in workers)
             counts['active'] = sum(counts.get(name, 0) for name in ACTIVE)

@@ -61,6 +61,7 @@ data:
       "central_diagnostic_days": 30,
       "central_failure_days": 90,
       "artifacts_pvc": "vibrato-artifacts",
+      "central_pvc": "vibrato-dataset",
       "image": "vibrato-worker:dev",
       "desired": 0,
       "max_workers": 1,

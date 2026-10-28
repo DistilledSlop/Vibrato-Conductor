@@ -254,6 +254,15 @@ class CoverageInventory:
         signature = self._file_signature(root / (run_id + '.json'))
         manifest_path = self.central_dir / run_id / 'manifest.json'
         manifest_signature = self._file_signature(manifest_path)
+        # Compact aliases depend on payload integrity and transitive source
+        # receipts, so a cache keyed only by these two files is insufficient.
+        try:
+            receipt = json.loads((root / (run_id + '.json')).read_text())
+            if receipt.get('compactSchemaVersion') is not None:
+                return (signature is not None and manifest_signature is not None
+                        and source_admitted(root, run_id, manifest_sha))
+        except (OSError, ValueError, TypeError, AttributeError):
+            return False
         key = (signature, manifest_signature, manifest_sha, QUALITY_POLICY_VERSION)
         cached = self._receipt_cache.get(run_id)
         if cached is None or cached[0] != key:
@@ -280,8 +289,19 @@ class CoverageInventory:
                 cached = self._metadata_cache.get(run_id)
                 if cached is None or cached[0] != signature:
                     try:
-                        if signature[0] is None or signature[1] is None or digest(manifest_path) != manifest:
+                        if signature[0] is None or signature[1] is None:
                             raise ValueError('missing or changed manifest')
+                        current_manifest = digest(manifest_path)
+                        if current_manifest != manifest:
+                            # Historical coverage keeps the source identity. Only accept a
+                            # different compact identity when its current controller receipt
+                            # binds both hashes and full compact verification succeeds.
+                            receipt = json.loads((self.central_dir / '.admission' / (run_id + '.json')).read_text())
+                            if (receipt.get('compactSchemaVersion') != 1
+                                    or receipt.get('sourceManifestSha256') != manifest
+                                    or receipt.get('manifestSha256') != current_manifest
+                                    or not self._receipt_current(run_id, manifest)):
+                                raise ValueError('unverified compact manifest alias')
                         manifest_data = json.loads(manifest_path.read_text())
                         files = manifest_data.get('files') if isinstance(manifest_data, dict) else None
                         metadata_file = next((f for f in files if isinstance(f, dict) and f.get('path') == 'metadata.json'), None) if isinstance(files, list) else None
@@ -420,7 +440,14 @@ class CoverageInventory:
             db.execute('BEGIN IMMEDIATE')
             prior = db.execute('SELECT manifest_sha,result FROM runs WHERE run_id=?', (run_id,)).fetchone()
             if prior:
-                if prior[0] != fingerprint: raise ValueError('Ingested run identity changed')
+                if prior[0] != fingerprint:
+                    # A verified compact record is a projection of the source already ingested.
+                    from .compact import compact_quality, inspect_compact
+                    if (not (run_dir / 'validation-evidence.json').is_file()
+                            or self.central_dir is None
+                            or compact_quality(run_dir, self.central_dir / '.admission').get('eligible') is not True
+                            or inspect_compact(run_dir)['sourceManifestSha256'] != prior[0]):
+                        raise ValueError('Ingested run identity changed')
                 return json.loads(prior[1])
             known = {r[0] for r in db.execute('SELECT id FROM targets')}
             observed = {}
@@ -457,8 +484,11 @@ class CoverageInventory:
             observed_contexts = set()
             proven_interactions = set()
             heartbeats = run_dir / 'heartbeats.jsonl'
-            if heartbeats.exists():
-                with heartbeats.open() as lines:
+            projection = run_dir / 'coverage-projection.json'
+            if heartbeats.exists() or projection.exists():
+                from .compact import coverage_lines
+                from contextlib import nullcontext
+                with (heartbeats.open() if heartbeats.exists() else nullcontext(coverage_lines(projection))) as lines:
                     for line in lines:
                         try: heartbeat = json.loads(line)
                         except ValueError:

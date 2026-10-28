@@ -18,7 +18,7 @@ class BackendTests(unittest.TestCase):
         self.spec = {'runId': 'run-001', 'task': 'director', 'seed': 7, 'seconds': 60, 'worldId': None}
 
     def test_kubernetes_uses_isolated_never_restart_pods_and_explicit_resources(self):
-        config = FleetConfig.from_dict({**self.config.__dict__, 'backend': 'kubernetes', 'world_bank_pvc': 'bank'})
+        config = FleetConfig.from_dict({**self.config.__dict__, 'backend': 'kubernetes', 'world_bank_pvc': 'bank', 'central_pvc': 'dataset'})
         manifest = KubernetesBackend(config).pod_manifest(self.spec)
         self.assertEqual(manifest['kind'], 'Pod')
         self.assertEqual(manifest['spec']['restartPolicy'], 'Never')
@@ -49,7 +49,7 @@ class BackendTests(unittest.TestCase):
                     self.assertEqual('memory' in resources, memory > 0)
                     self.assertEqual(resources['ephemeral-storage'], '8192Mi')
 
-    def test_source_admissions_are_read_only_in_docker_and_absent_from_kubernetes(self):
+    def test_source_central_is_read_only_in_docker_and_kubernetes(self):
         central = Path(self.folder.name) / 'central'
         admissions = central / '.admission'
         admissions.mkdir(parents=True)
@@ -60,12 +60,14 @@ class BackendTests(unittest.TestCase):
                 'conductor.backends.command', side_effect=['created-id', 'started']) as invoke:
             backend.create_worker(self.spec)
         argv = invoke.call_args_list[0].args[0]
-        self.assertIn(f'type=bind,src={admissions},dst=/source-admissions,readonly', argv)
-        self.assertIn('SOURCE_ADMISSIONS_DIR=/source-admissions', argv)
-        kube = FleetConfig.from_dict({**config.__dict__, 'backend': 'kubernetes', 'world_bank_pvc': 'bank'})
+        self.assertIn(f'type=bind,src={central},dst=/source-central,readonly', argv)
+        self.assertIn('SOURCE_ADMISSIONS_DIR=/source-central/.admission', argv)
+        kube = FleetConfig.from_dict({**config.__dict__, 'backend': 'kubernetes', 'world_bank_pvc': 'bank', 'central_pvc': 'dataset'})
         container = KubernetesBackend(kube).pod_manifest(self.spec)['spec']['containers'][0]
-        self.assertEqual(next(e['value'] for e in container['env'] if e['name'] == 'SOURCE_ADMISSIONS_DIR'), '/source-admissions')
-        self.assertFalse(any(v['mountPath'] == '/source-admissions' for v in container['volumeMounts']))
+        self.assertEqual(next(e['value'] for e in container['env'] if e['name'] == 'SOURCE_ADMISSIONS_DIR'), '/source-central/.admission')
+        self.assertTrue(any(v['mountPath'] == '/source-central' and v.get('readOnly') is True for v in container['volumeMounts']))
+        volumes = KubernetesBackend(kube).pod_manifest(self.spec)['spec']['volumes']
+        self.assertTrue(any(v.get('persistentVolumeClaim', {}).get('claimName') == 'dataset' and v['persistentVolumeClaim'].get('readOnly') is True for v in volumes))
 
     def test_assignment_modes_and_operator_permissions_are_explicit(self):
         baseline = worker_env(self.config, self.spec)

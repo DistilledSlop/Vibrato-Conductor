@@ -82,7 +82,27 @@ def main():
     export.add_argument('--central', type=Path, required=True)
     export.add_argument('--output', type=Path, required=True)
     export.add_argument('--run-id', action='append', help='Restrict to these explicitly selected central runs; repeat for each')
+    migration = commands.add_parser('compact-history', help='Plan or migrate previously delivered terminal runs')
+    migration.add_argument('--config', type=Path, required=True)
+    migration.add_argument('--limit', type=int, default=10)
+    migration.add_argument('--apply', action='store_true', help='Apply this bounded migration; default is dry-run')
+    migration.add_argument('--include-imports', action='store_true', help='Include verified delivery/coverage imports absent from fleet')
     args = parser.parse_args()
+    if args.command == 'compact-history':
+        from .fleet import FleetConfig
+        from .artifacts import ArtifactStore
+        from .web import SERVICE_CONFIG_KEYS
+        data = json.loads(args.config.read_text())
+        config = FleetConfig.from_dict({k: v for k, v in data.items() if k not in SERVICE_CONFIG_KEYS})
+        if config.central_dir is None: raise ValueError('Migration requires central_dir')
+        store = ArtifactStore(config.artifacts_dir, config.central_dir, state_dir=config.state_dir / 'delivery',
+            max_buffer_bytes=int(data.get('max_buffer_bytes', 64 * 1024**3)),
+            retry_seconds=float(data.get('delivery_retry_seconds', 5)),
+            max_central_bytes=int(data.get('max_central_bytes', 1024**4)))
+        from .history import migration_workers
+        workers = lambda: migration_workers(config, store, include_imports=args.include_imports)
+        print(json.dumps(store.migrate_history(workers, config.workspace_dir, limit=args.limit, apply=args.apply), indent=2))
+        return 0
     if args.command == 'coverage-report':
         import sqlite3
         import tempfile

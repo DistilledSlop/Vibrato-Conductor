@@ -43,7 +43,7 @@ def worker_env(config, spec):
     env.update({
         'RUN_ID': spec['runId'], 'SEED': str(spec['seed']), 'TASK': spec['task'],
         'RUN_SECONDS': str(spec['seconds']), 'PERF_MODE': config.perf,
-        'SOURCE_ADMISSIONS_DIR': '/source-admissions',
+        'SOURCE_ADMISSIONS_DIR': '/source-central/.admission',
         'STARTUP_SECONDS': str(config.startup_timeout), 'MODE': config.mode,
         'ACCEPT_EULA': 'true' if config.accept_eula else 'false',
         'ACCEPT_OFFLINE': 'true' if config.accept_offline else 'false',
@@ -120,9 +120,12 @@ class DockerBackend:
         if config.world_bank:
             argv += ['--mount', f'type=bind,src={config.world_bank},dst=/world-bank,readonly']
         if config.central_dir:
-            admissions = config.central_dir / '.admission'
-            if admissions.is_dir() and not admissions.is_symlink():
-                argv += ['--mount', f'type=bind,src={admissions},dst=/source-admissions,readonly']
+            central = config.central_dir
+            if central.is_dir() and not central.is_symlink():
+                argv += ['--mount', f'type=bind,src={central},dst=/source-central,readonly']
+                admissions = central / '.admission'
+                if admissions.is_dir() and not admissions.is_symlink():
+                    argv += ['--mount', f'type=bind,src={admissions},dst=/source-admissions,readonly']
         for key, value in worker_env(config, spec).items(): argv += ['--env', f'{key}={value}']
         argv += [config.image]
         backend_id = command(argv).strip()
@@ -172,6 +175,9 @@ class KubernetesBackend:
         ]
         mounts = [{'name': 'work', 'mountPath': '/work'}, {'name': 'tmp', 'mountPath': '/tmp'},
                   {'name': 'shm', 'mountPath': '/dev/shm'}, {'name': 'artifacts', 'mountPath': '/artifacts'}]
+        if config.central_pvc:
+            volumes.append({'name': 'source-central', 'persistentVolumeClaim': {'claimName': config.central_pvc, 'readOnly': True}})
+            mounts.append({'name': 'source-central', 'mountPath': '/source-central', 'readOnly': True})
         if config.world_bank_pvc:
             volumes.append({'name': 'world-bank', 'persistentVolumeClaim': {'claimName': config.world_bank_pvc, 'readOnly': True}})
             mounts.append({'name': 'world-bank', 'mountPath': '/world-bank', 'readOnly': True})
