@@ -1,4 +1,7 @@
+import fcntl
 import json
+import os
+import threading
 import importlib.util
 import sys
 from unittest.mock import patch
@@ -83,6 +86,46 @@ class TrainingIntegrationTest(unittest.TestCase):
                 self.assertEqual(receipt['sourceManifestSha256'], original)
                 self.assertTrue(receipt['quality']['eligible'])
                 self.assertEqual(len(export_index(root / 'central', root / 'index.json')['accepted']), 1)
+
+    def test_import_publication_and_enqueue_are_one_guarded_transaction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); source = make_run(root / 'isolated', 'race', 1)
+            config = root / 'config.json'
+            atomic_json(config, {'fleet_id': 'test', 'state_dir': str(root / 'control'),
+                'artifacts_dir': str(root / 'spool'), 'workspace_dir': str(root / 'workspaces'),
+                'central_dir': str(root / 'central'), 'accept_eula': True, 'accept_offline': True})
+            observer = ArtifactStore(root / 'spool', root / 'central', root / 'control/delivery')
+            old_rename = os.rename; outcomes = []
+            def rename(src, dst):
+                old_rename(src, dst)
+                if Path(dst) == root / 'spool/race':
+                    def attempt():
+                        try: observer.enqueue('race', compact=False); outcomes.append('enqueued')
+                        except ValueError as error: outcomes.append(str(error))
+                    thread = threading.Thread(target=attempt); thread.start(); thread.join(3)
+                    self.assertFalse(thread.is_alive())
+            with patch('conductor.training.os.rename', side_effect=rename): import_run(source, config)
+            self.assertEqual(len(outcomes), 1)
+            self.assertIn('busy', outcomes[0])
+            row = next(row for row in observer.snapshot()['runs'] if row['run_id'] == 'race')
+            self.assertEqual(row['compact_requested'], 1)
+            self.assertEqual(row['state'], 'delivered')
+
+    def test_import_busy_guard_leaves_no_public_spool_or_queue(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); source = make_run(root / 'isolated', 'race', 1)
+            config = root / 'config.json'
+            atomic_json(config, {'fleet_id': 'test', 'state_dir': str(root / 'control'),
+                'artifacts_dir': str(root / 'spool'), 'workspace_dir': str(root / 'workspaces'),
+                'central_dir': str(root / 'central'), 'accept_eula': True, 'accept_offline': True})
+            store = ArtifactStore(root / 'spool', root / 'central', root / 'control/delivery')
+            with (store.state_dir / 'history.lock').open('a') as lease:
+                fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                with self.assertRaisesRegex(ValueError, 'busy'): import_run(source, config)
+            self.assertFalse((root / 'spool/race').exists())
+            self.assertEqual(list((root / 'spool').iterdir()), [])
+            self.assertEqual(store.snapshot()['runs'], [])
+            self.assertTrue(source.exists())
 
     def test_export_obeys_current_receipts_rechecks_integrity_and_never_splits_world(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -42,55 +42,63 @@ def import_run(source: Path, config_path: Path) -> dict:
     if not quality['eligible']:
         raise ValueError('Source is not independently eligible: ' + ', '.join(quality['reasons']))
     fingerprint = digest(source / 'manifest.json')
-    existing_target = fleet.central_dir / run_id
-    existing_receipt = fleet.central_dir / '.admission' / (run_id + '.json')
-    if existing_target.exists() or existing_receipt.exists():
-        if not existing_target.is_dir() or not existing_receipt.is_file():
-            raise ValueError('Existing central run lacks a matching admission receipt')
-        verify_manifest(existing_target)
-        prior = json.loads(existing_receipt.read_text())
-        if (prior.get('runId') != run_id or prior.get('manifestSha256') != digest(existing_target / 'manifest.json')
-                or not source_admitted(fleet.central_dir / '.admission', run_id, fingerprint)
-                or not quality_report(existing_target, fleet.central_dir / '.admission').get('eligible')):
-            raise ValueError('Existing central admission is stale, revoked or inconsistent')
     spool = fleet.artifacts_dir.resolve()
     spool.mkdir(parents=True, exist_ok=True)
     dest = spool / run_id
-    if dest.exists():
-        verify_manifest(dest)
-        if digest(dest / 'manifest.json') != fingerprint:
-            raise ValueError('Spool run conflicts with source manifest')
-    else:
-        stage = Path(tempfile.mkdtemp(prefix='.import-', dir=spool))
-        try:
-            shutil.copytree(source, stage / run_id)
-            copied = stage / run_id
-            verify_manifest(copied)
-            if digest(copied / 'manifest.json') != fingerprint:
-                raise ValueError('Copied manifest differs')
-            try:
-                os.rename(copied, dest)
-            except FileExistsError:
-                verify_manifest(dest)
-                if digest(dest / 'manifest.json') != fingerprint:
-                    raise ValueError('Concurrent spool import conflicts')
-        finally:
-            shutil.rmtree(stage, ignore_errors=True)
     store = ArtifactStore(spool, fleet.central_dir, state_dir=fleet.state_dir / 'delivery',
                           max_buffer_bytes=int(config_data.get('max_buffer_bytes', 64 * 1024**3)),
                           retry_seconds=float(config_data.get('delivery_retry_seconds', 5)),
                           max_central_bytes=int(config_data.get('max_central_bytes', 1024**4)))
-    # A central run that already has a receipt must never be redelivered merely
-    # to enroll coverage: redelivery could replace an independent revocation.
-    target = fleet.central_dir / run_id
-    if not target.exists():
-        store.enqueue(run_id, compact=compact_enabled)
-        store.deliver_pending(limit=1)
-    else:
-        with store._db() as db:
-            row = db.execute('SELECT state,manifest_sha FROM deliveries WHERE run_id=?', (run_id,)).fetchone()
-        if row is None or row['state'] != 'delivered' or row['manifest_sha'] != fingerprint:
-            raise ValueError('Existing central run is not tracked as delivered in this queue')
+    # Keep the copy private while potentially slow file verification runs. The
+    # controller cannot observe it as a run until publication and enrollment.
+    stage = Path(tempfile.mkdtemp(prefix='.import-', dir=spool))
+    try:
+        copied = stage / run_id
+        shutil.copytree(source, copied)
+        verify_manifest(copied)
+        if digest(copied / 'manifest.json') != fingerprint:
+            raise ValueError('Copied manifest differs')
+        target = fleet.central_dir / run_id
+        receipt_path = fleet.central_dir / '.admission' / (run_id + '.json')
+        with store.history_guard():
+            # Recheck both the existing receipt and queue under the same guard
+            # used for publication, so a concurrent revocation is never undone.
+            if target.exists() or receipt_path.exists():
+                if not target.is_dir() or not receipt_path.is_file():
+                    raise ValueError('Existing central run lacks a matching admission receipt')
+                verify_manifest(target)
+                prior = json.loads(receipt_path.read_text())
+                if (prior.get('runId') != run_id or prior.get('manifestSha256') != digest(target / 'manifest.json')
+                        or not source_admitted(fleet.central_dir / '.admission', run_id, fingerprint)
+                        or not quality_report(target, fleet.central_dir / '.admission').get('eligible')):
+                    raise ValueError('Existing central admission is stale, revoked or inconsistent')
+                with store._db() as db:
+                    row = db.execute('SELECT state,manifest_sha FROM deliveries WHERE run_id=?', (run_id,)).fetchone()
+                if row is None or row['state'] != 'delivered' or row['manifest_sha'] != fingerprint:
+                    raise ValueError('Existing central run is not tracked as delivered in this queue')
+            published = False
+            if dest.exists():
+                verify_manifest(dest)
+                if digest(dest / 'manifest.json') != fingerprint:
+                    raise ValueError('Spool run conflicts with source manifest')
+            else:
+                os.rename(copied, dest)
+                published = True
+            if not target.exists():
+                try:
+                    store.enqueue(run_id, compact=compact_enabled)
+                except Exception:
+                    # If enrollment failed before creating a job, remove only
+                    # this import's newly published copy while still guarded.
+                    with store._db() as db:
+                        queued = db.execute('SELECT 1 FROM deliveries WHERE run_id=?', (run_id,)).fetchone()
+                    if published and queued is None:
+                        os.rename(dest, copied)
+                    raise
+        if not target.exists():
+            store.deliver_pending(limit=1)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
     if not target.is_dir():
         raise ValueError('Delivery is pending; retry the import after the delivery queue recovers')
     verify_manifest(target)
