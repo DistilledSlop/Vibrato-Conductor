@@ -2,6 +2,7 @@
 """Measure a bounded healthy window for the isolated gallery fleet; always drain afterward."""
 import argparse
 import json
+import signal
 import importlib.util
 import time
 from pathlib import Path
@@ -26,6 +27,9 @@ def main():
         parser.error('Worker count must fit the configured ceiling; hold at least 30 seconds')
     if test.api()['counts']['active'] or test.api()['desired']:
         raise ValueError('Capacity test requires a running, drained controller')
+    def interrupted(*_):
+        raise KeyboardInterrupt()
+    signal.signal(signal.SIGTERM, interrupted)
     report = {'passed': False, 'workers': args.workers, 'holdSeconds': args.hold_seconds,
               'profile': test.config, 'samples': []}
     output = test.state.parent / 'capacity-results.json'
