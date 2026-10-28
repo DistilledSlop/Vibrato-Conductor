@@ -42,7 +42,14 @@ class ArtifactTests(unittest.TestCase):
             self.assertEqual(store.snapshot()['eligible'], 1)
             central = root / 'central' / run.name
             original = {str(p.relative_to(central)): p.read_bytes() for p in central.rglob('*') if p.is_file()}
-            audit = store.reaudit(run.name)
+            with store._db() as db:
+                legacy = json.loads(db.execute('SELECT quality FROM deliveries WHERE run_id=?', (run.name,)).fetchone()[0])
+                legacy.pop('policyVersion', None)
+                db.execute('UPDATE deliveries SET quality=? WHERE run_id=?', (json.dumps(legacy), run.name))
+            audits = store.reaudit_outdated()
+            self.assertEqual(len(audits), 1)
+            self.assertEqual(store.reaudit_outdated(), [])
+            audit = audits[0]
             self.assertFalse(audit['quality']['eligible'])
             self.assertIn('worker_native_thread_exhausted', audit['quality']['reasons'])
             self.assertEqual(store.snapshot()['eligible'], 0)

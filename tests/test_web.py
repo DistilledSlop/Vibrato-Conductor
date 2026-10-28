@@ -84,6 +84,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status,200);self.assertEqual(json.loads(data)['text'],'second\nthird')
     def test_delivery_failure_pauses_launches_but_not_reconciliation(self):
         class BrokenStore:
+            def reaudit_outdated(self,limit): return []
             def snapshot(self): return {}
             def enqueue(self,_): raise OSError('storage unavailable')
             def deliver_pending(self,limit): raise OSError('storage unavailable')

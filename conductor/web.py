@@ -63,6 +63,8 @@ class Service:
         root = self.fleet.config.artifacts_dir
         workers = self.fleet.snapshot().get('workers', [])
         errors = []
+        try: self.artifacts.reaudit_outdated(limit=2)
+        except (OSError, ValueError) as error: errors.append('Admission re-audit: ' + str(error))
         for worker in workers:
             run_id = worker['runId']
             run = root / run_id

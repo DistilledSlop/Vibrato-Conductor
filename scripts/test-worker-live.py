@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--world-bank',type=Path,default=Path('.state/world-bank'))
     parser.add_argument('--world-id',default='seed-424242')
     parser.add_argument('--cpus',type=float,default=4)
+    parser.add_argument('--memory-mb',type=int,default=6144,help='Container memory limit;0 omits the quota')
     parser.add_argument('--image',default='vibrato-worker:dev')
     parser.add_argument('--gamemode',choices=['survival','creative','adventure','spectator'],default='survival')
     parser.add_argument('--operator',action='store_true')
@@ -41,7 +42,7 @@ def main():
         'fleet_id':'telemetry-tests','state_dir':str(state/'control'),
         'artifacts_dir':str(state/'artifacts'),'workspace_dir':str(state/'workspaces'),
         'world_bank':str(args.world_bank.resolve()),'allow_world_copy':True,
-        'image':args.image,'cpus':args.cpus,'memory_mb':6144,'storage_mb':8192,
+        'image':args.image,'cpus':args.cpus,'memory_mb':args.memory_mb,'storage_mb':8192,
         'mode':args.mode,'seconds':args.seconds,'accept_eula':True,'accept_offline':True,
         'worker_env':{'GAMEMODE':args.gamemode,'OPERATOR':str(args.operator).lower(),'OP_PERMISSION_LEVEL':str(args.operator_level),'REQUESTED_CPUS':str(args.cpus),
                       **({'LP_NUM_THREADS':str(args.render_threads)} if args.render_threads is not None else {})},

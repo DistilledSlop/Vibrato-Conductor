@@ -17,6 +17,9 @@ from .storage import IDENTIFIER, atomic_json, digest, verify_manifest
 from .diagnostics import native_thread_failure
 
 
+QUALITY_POLICY_VERSION = 2
+
+
 def capture_integrity(root: Path) -> bool:
     """Check all raw/index pairs and flush markers independently of worker summary labels."""
     captures = root / 'captures'
@@ -143,7 +146,7 @@ def quality_report(root: Path) -> dict:
     world = metadata.get('world', {})
     if world.get('id') and not world.get('revision'): reasons.append('world_revision_missing')
     if not world.get('id') and 'seed' not in world: reasons.append('world_seed_missing')
-    return {'eligible': not reasons, 'reasons': sorted(set(reasons)), 'taskSuccess': result.get('taskSuccess'),
+    return {'policyVersion': QUALITY_POLICY_VERSION, 'eligible': not reasons, 'reasons': sorted(set(reasons)), 'taskSuccess': result.get('taskSuccess'),
             'diagnosticPassed': result.get('diagnosticPassed'), 'mode': metadata.get('mode')}
 
 
@@ -351,6 +354,14 @@ class ArtifactStore:
                 if stage.exists(): shutil.rmtree(stage)
                 self._usage_at = 0
         return outcomes
+
+    def reaudit_outdated(self, limit: int = 2) -> list[dict]:
+        """Upgrade cached admission decisions after a policy change in bounded batches."""
+        with self.lock, self._db() as db:
+            rows = db.execute("SELECT run_id,quality FROM deliveries WHERE state='delivered' ORDER BY queued_at").fetchall()
+        outdated = [row['run_id'] for row in rows
+                    if json.loads(row['quality']).get('policyVersion') != QUALITY_POLICY_VERSION]
+        return [self.reaudit(run_id) for run_id in outdated[:max(0, int(limit))]]
 
     def reaudit(self, run_id: str) -> dict:
         """Reassess delivered evidence under current rules without changing finalized artifacts."""
