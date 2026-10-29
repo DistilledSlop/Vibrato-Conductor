@@ -203,10 +203,10 @@ class TrainingIntegrationTest(unittest.TestCase):
                 calls.append(argv)
                 stage = Path(argv[argv.index('--out') + 1]); stage.mkdir()
                 atomic_json(stage / 'manifest.json', {'vocab': str(stage / 'vocab.json'), 'sessions': []})
-            with patch.object(module, 'REPO_ROOT', root), patch.object(module, 'DEFAULT_TRANSFORMER', root / 'transformer'), patch.object(sys, 'argv', ['build']), patch.object(module.subprocess, 'run', side_effect=fake_run):
+            with patch.object(module, 'REPO_ROOT', root), patch.object(module, 'DEFAULT_TRANSFORMER', root / 'transformer'), patch.dict(os.environ, {'TRAINING_ROOT': str(root / 'training')}), patch.object(sys, 'argv', ['build']), patch.object(module.subprocess, 'run', side_effect=fake_run):
                 module.main()
                 module.main()
-            outputs = list((root / '.state').glob('training-*'))
+            outputs = list((root / 'training/datasets').glob('training-*'))
             self.assertEqual(len(outputs), 2)
             self.assertTrue(all((output / 'source-index.json').is_file() for output in outputs))
             for argv in calls:

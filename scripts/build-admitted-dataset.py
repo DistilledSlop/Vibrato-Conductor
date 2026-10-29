@@ -11,7 +11,7 @@ from uuid import uuid4
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_TRANSFORMER = Path('/opt/Protocol-Transformer')
+DEFAULT_TRANSFORMER = REPO_ROOT.parent / 'Protocol-Transformer'
 sys.path.insert(0, str(REPO_ROOT))
 from conductor.training import export_index
 
@@ -19,7 +19,8 @@ from conductor.training import export_index
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--central', type=Path, default=REPO_ROOT / '.state/gallery/dataset', help='Central admitted capture store (default: repository .state/gallery/dataset)')
-    parser.add_argument('--output', type=Path, help='New output directory; default: repository .state/training-<timestamp>-<unique id>; never overwritten')
+    parser.add_argument('--training-root', type=Path, default=Path(os.environ.get('TRAINING_ROOT', REPO_ROOT.parent / 'vibrato-training')), help='Training root; datasets are published under datasets/ (default: sibling vibrato-training)')
+    parser.add_argument('--output', type=Path, help='New output directory; defaults to a unique name under training root datasets/; never overwritten')
     parser.add_argument('--transformer', type=Path, default=DEFAULT_TRANSFORMER)
     parser.add_argument('--jobs', type=int, default=48, help='Parallel preprocessing workers (default: 48)')
     parser.add_argument('--index-jobs', type=int, default=min(8, len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else os.cpu_count() or 1), help='Parallel admission checks (default: up to 8)')
@@ -30,7 +31,7 @@ def main():
     args = parser.parse_args()
     if args.jobs is not None and args.jobs < 1: parser.error('--jobs must be positive')
     if args.index_jobs < 1: parser.error('--index-jobs must be positive')
-    output = (args.output or REPO_ROOT / '.state' / f"training-{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}-{uuid4().hex[:12]}").resolve()
+    output = (args.output or args.training_root / 'datasets' / f"training-{datetime.now(timezone.utc):%Y%m%dT%H%M%S%fZ}-{uuid4().hex[:12]}").resolve()
     if output.exists(): parser.error('output already exists; choose a new dataset directory')
     runtime_label = 'local Node' if args.local_runtime else args.runtime_image
     print(f'Building dataset: central={args.central.resolve()} output={output} runtime={runtime_label} jobs={args.jobs} index_jobs={args.index_jobs}', file=sys.stderr, flush=True)
