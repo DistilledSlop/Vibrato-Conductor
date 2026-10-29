@@ -12,6 +12,7 @@ from pathlib import Path
 from conductor.artifacts import ArtifactStore
 from conductor.storage import artifact_manifest, atomic_json, digest
 from conductor.training import export_index, import_run
+from conductor.capture_pool import copy_training_captures
 
 
 def make_run(root, name, seed):
@@ -182,8 +183,35 @@ class TrainingIntegrationTest(unittest.TestCase):
             self.assertEqual(calls[0][0], 'node')
             self.assertEqual(calls[0][calls[0].index('--jobs') + 1], '48')
             index = json.loads((output / 'source-index.json').read_text())
+            pool = output / 'captures'
+            self.assertEqual({p.name for p in pool.iterdir()}, {Path(base).name + ext for base in index['trainBases'] for ext in ('.bin', '.jsonl')})
+            for base in index['trainBases']:
+                for ext in ('.bin', '.jsonl'):
+                    self.assertEqual((pool / (Path(base).name + ext)).read_bytes(), Path(base + ext).read_bytes())
             self.assertEqual((output / 'val.txt').read_text().splitlines(), index['validationSessionNames'])
             self.assertEqual(json.loads((output / 'manifest.json').read_text())['vocab'], str(output / 'vocab.json'))
+
+    def test_capture_pool_rejects_collision_and_hash_mismatch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            a = root / 'a' / 'same'; b = root / 'b' / 'same'
+            a.parent.mkdir(); b.parent.mkdir()
+            for base in (a, b):
+                Path(str(base) + '.bin').write_bytes(b'abc')
+                Path(str(base) + '.jsonl').write_bytes(b'index')
+            def record(base):
+                return {'base': str(base), 'binarySha256': digest(Path(str(base) + '.bin')),
+                        'indexSha256': digest(Path(str(base) + '.jsonl'))}
+            index = {'trainBases': [str(a), str(b)], 'accepted': [{'captures': [record(a), record(b)]}]}
+            with self.assertRaisesRegex(ValueError, 'basename'):
+                copy_training_captures(index, root / 'collision')
+            self.assertFalse((root / 'collision').exists())
+            index['trainBases'] = [str(a)]
+            index['accepted'][0]['captures'][0]['binarySha256'] = 'wrong'
+            with self.assertRaisesRegex(ValueError, 'hash mismatch'):
+                copy_training_captures(index, root / 'bad')
+            with self.assertRaises(FileExistsError):
+                copy_training_captures(index, root / 'bad')
 
     def test_builder_defaults_use_repository_paths_and_unique_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:

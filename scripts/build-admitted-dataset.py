@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TRANSFORMER = REPO_ROOT.parent / 'Protocol-Transformer'
 sys.path.insert(0, str(REPO_ROOT))
 from conductor.training import export_index
+from conductor.capture_pool import copy_training_captures
 
 
 def main():
@@ -70,6 +71,7 @@ def main():
         else:
             argv = ['node', str(builder), *builder_args]
         subprocess.run(argv, check=True)
+        copy_training_captures(before, stage / 'captures', jobs=args.index_jobs)
         after = export_index(args.central, root / 'source-index-after.json', selected, jobs=args.index_jobs)
         if before != after:
             raise ValueError('Admission or capture set changed during preprocessing; retry with fresh inputs')
